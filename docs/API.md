@@ -1,6 +1,6 @@
 # APIMON API Contract
 
-**Status:** Proposed contract; endpoints are not implemented yet.
+**Status:** Proposed Flask user API; Worker service routes are implemented separately in Phase 4.
 
 This document defines the initial HTTP API shape for the APIMON backend. Exact response envelopes and field names must be kept consistent once implementation begins.
 
