@@ -38,7 +38,17 @@ These are initial architecture decisions and may be revised through documented t
 
 ## Getting started
 
-This repository is being initialized. Component-specific setup instructions will be added as each application is introduced.
+The low-fidelity frontend prototype is available in `frontend/`. It currently uses browser-local demo data and does not call a backend or execute real checks.
+
+To run it locally:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Read [frontend/README.md](frontend/README.md) for prototype behavior and limitations.
 
 1. Read [AGENTS.md](AGENTS.md) before making changes.
 2. Read [docs/PRD.md](docs/PRD.md) for product scope.
