@@ -65,7 +65,9 @@ test("does not follow redirects", async () => {
   assert.equal(result.errorCategory, "redirect_blocked");
 });
 test("records timeout and connection failures with safe messages", async () => {
-  const timeout = await checkMonitor(monitor, { fetchImpl: async () => { const error = new Error("aborted"); error.name = "AbortError"; throw error; } });
+  const timeout = await checkMonitor({ ...monitor, timeoutSeconds: 1 }, { fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => { const error = new Error("aborted"); error.name = "AbortError"; reject(error); }, { once: true });
+  }) });
   assert.equal(timeout.errorCategory, "timeout");
   const connection = await checkMonitor(monitor, { fetchImpl: async () => { throw new Error("internal host 10.0.0.1 refused"); } });
   assert.equal(connection.errorCategory, "connection_error");
