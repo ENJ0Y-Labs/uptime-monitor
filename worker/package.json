@@ -1,12 +1,15 @@
 {
   "name": "apimon-worker",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test"
+    "test": "node --test",
+    "db:create": "wrangler d1 create apimon-db",
+    "db:migrate:local": "wrangler d1 migrations apply apimon-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply apimon-db --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
