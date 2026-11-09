@@ -1,4 +1,4 @@
-import { checkMonitor } from "./monitoring.js";
+import { checkMonitor, validateMonitor } from "./monitoring.js";
 import {
   claimDueMonitors,
   createMonitor,
@@ -22,6 +22,7 @@ function authorized(request, env) {
 }
 
 function parseMonitorInput(body, id) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Request body must be a JSON object.");
   return {
     id,
     name: body.name,
@@ -56,7 +57,6 @@ export default {
         const body = await request.json();
         const id = crypto.randomUUID();
         const monitor = parseMonitorInput(body, id);
-        const { validateMonitor } = await import("./monitoring.js");
         const valid = validateMonitor(monitor);
         const created = await createMonitor(env.APIMON_DB, valid);
         return json({ monitor: created }, 201);
@@ -79,7 +79,6 @@ export default {
       if (parts.length === 3 && request.method === "GET") return json({ monitor: existing });
       if (parts.length === 3 && request.method === "PATCH") {
         const body = await request.json();
-        const { validateMonitor } = await import("./monitoring.js");
         const valid = validateMonitor(parseMonitorInput({ ...existing, ...body }, id));
         return json({ monitor: await updateMonitor(env.APIMON_DB, id, valid) });
       }
