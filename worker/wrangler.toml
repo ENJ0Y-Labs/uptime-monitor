@@ -3,5 +3,13 @@ main = "src/index.js"
 compatibility_date = "2026-11-09"
 keep_vars = true
 
+[[d1_databases]]
+binding = "APIMON_DB"
+database_name = "apimon-db"
+# Replace this placeholder with the database_id returned by: npx wrangler d1 create apimon-db
+database_id = "00000000000000000000000000000000"
+migrations_dir = "migrations"
+
 [triggers]
-crons = ["*/10 * * * *"]
+# Poll due monitors every minute; each monitor's interval is enforced in D1.
+crons = ["* * * * *"]

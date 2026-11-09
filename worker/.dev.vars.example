@@ -1,3 +1,3 @@
-# Copy to .dev.vars only if you want to override the Wrangler [vars] value locally.
-# Do not put secrets in this file. It is ignored by git.
-APIMON_MONITORS='[{"id":"retailos-backend","name":"RetailOS Backend","url":"https://retailos-server.onrender.com/health","enabled":true,"intervalMinutes":10,"timeoutSeconds":10,"expectedStatus":200}]'
+# Copy this file to .dev.vars and replace the placeholder with a random secret.
+# Keep .dev.vars out of Git. Use the same value only in trusted server-side clients.
+APIMON_API_TOKEN=replace-with-a-random-secret-at-least-32-characters-long

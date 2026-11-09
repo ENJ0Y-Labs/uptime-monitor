@@ -1,6 +1,6 @@
 # APIMON System Architecture
 
-**Status:** Phase 3 Worker implementation in progress
+**Status:** Phase 4 D1 persistence implemented on the feature branch; frontend and account integration remain pending
 
 ## 1. System components
 
@@ -16,7 +16,7 @@ The backend is not the recurring scheduler. Its availability must not determine 
 
 ### Worker — Cloudflare Workers
 
-The Worker is the independent scheduled execution component. Its Cron Trigger runs every 10 minutes (`*/10 * * * *`). It currently reads operator-managed monitor definitions from the temporary `APIMON_MONITORS` Worker binding, performs bounded HTTP GET checks, and emits structured result logs. It does not persist results yet.
+The Worker is the independent scheduled execution component. Its Cron Trigger polls D1 every minute (`* * * * *`) and claims only monitors whose `next_check_at` is due. It performs bounded HTTP GET checks and persists each result in D1. Per-monitor intervals are 1, 5, 10, 20, or 30 minutes.
 
 The worker must handle duplicate invocations and concurrent execution safely. It must not trust monitor URLs or configuration without validation.
 
@@ -38,7 +38,7 @@ PostgreSQL is the initial primary application datastore for accounts, monitor co
 
 The scheduler must not run as a background thread, Flask request hook, or process hosted inside the application being monitored. A sleeping or unavailable monitored service must not stop the scheduler from checking it.
 
-For Phase 3, monitor definitions are configured through the operator-managed `APIMON_MONITORS` JSON binding. This is separate from browser local storage: frontend monitor changes are not automatically registered with the Worker. Check results are structured logs only and are not durable. Phase 4 must replace this temporary configuration/logging path with durable storage and a secure worker-to-storage integration. Do not assume Cloudflare Workers can directly access a private PostgreSQL database without an explicitly configured secure connectivity solution.
+The Worker now reads and writes durable monitor and check-result records in D1. Its API is protected by a shared service token and must only be called by trusted server-side clients. The React frontend still stores prototype monitor settings in browser local storage; those settings are not synchronized to D1. Account ownership and PostgreSQL synchronization remain later work.
 
 ## 4. Initial data concepts
 
@@ -64,7 +64,7 @@ Exact schemas and migration strategy are implementation decisions and must be do
 - Prevent overlapping duplicate checks for a monitor.
 - Apply a bounded batch size (25 monitors) and per-request timeout.
 - Redirects are not followed.
-- Emit structured result logs; persistence is deferred to Phase 4.
+- Persist check results in D1 and emit structured operational logs.
 - Record scheduler execution errors separately from target failures.
 
 Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger strategy must be validated against Cloudflare plan limits and the required per-monitor interval semantics before production use. A single trigger can poll due work, but it must not assume every monitor is due at every trigger.
@@ -90,7 +90,7 @@ Deployments are separate. Each component must have documented environment variab
 
 ## 8. Phase 3 implementation boundary
 
-The Worker implementation is under `worker/`. It exports a scheduled handler and a minimal `/health` route. The Worker uses an operator-managed JSON binding until durable monitor storage is implemented. The current SSRF checks reject localhost, common private/reserved IPv4 ranges, IPv6 literal hosts, credentials, non-standard ports, and redirects. They do not fully eliminate DNS rebinding or all egress routing risks; keep monitor configuration operator-controlled until comprehensive SSRF defenses and authenticated monitor management are in place.
+The Worker implementation is under `worker/`. It exports a scheduled handler, a public `/health` route, and token-protected monitor CRUD/history routes. D1 schema and migrations live under `worker/migrations/`. The current SSRF checks reject localhost, common private/reserved IPv4 ranges, IPv6 literal hosts, credentials, non-standard ports, and redirects. They do not fully eliminate DNS rebinding or all egress routing risks; keep monitor configuration operator-controlled until comprehensive SSRF defenses and authenticated monitor management are in place.
 
 ## 9. Open architecture decisions
 

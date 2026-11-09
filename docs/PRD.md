@@ -155,7 +155,7 @@ The first notification channel is email. Notify users when a monitor enters a co
 
 1. **Foundation:** repository conventions, architecture, API contract, environments.
 2. **Monitoring engine:** one configured target checked by the independent worker.
-3. **Persistence:** monitor configuration and check-result storage.
+3. **Persistence:** Cloudflare D1 stores Worker monitor configurations and check results; account ownership and frontend synchronization remain separate integration work.
 4. **Backend API:** authenticated monitor management and history endpoints.
 5. **Frontend MVP:** create monitor, list monitors, detail and history views.
 6. **Incidents and notifications:** failure thresholds, recovery, email.

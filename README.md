@@ -67,4 +67,4 @@ Read [frontend/README.md](frontend/README.md) for prototype behavior and limitat
 
 ## Project status
 
-**Phase 3 implementation in progress.** The frontend MVP has been merged. The Cloudflare Worker scheduled checker is implemented on its feature branch; it uses temporary operator-managed monitor configuration and structured logs until Phase 4 adds durable storage.
+**Phase 4 implementation in progress.** The frontend prototype and scheduled Cloudflare Worker are present. The Phase 4 feature branch adds Cloudflare D1 persistence, an authenticated Worker monitor API, and due-monitor scheduling. The frontend remains local-storage-only until its integration phase.

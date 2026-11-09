@@ -2,6 +2,7 @@ const DEFAULT_TIMEOUT_SECONDS = 10;
 const DEFAULT_EXPECTED_STATUS = 200;
 const MAX_TARGETS_PER_RUN = 25;
 const MAX_URL_LENGTH = 2048;
+const SUPPORTED_INTERVALS = new Set([1, 5, 10, 20, 30]);
 
 function isPrivateIpv4(hostname) {
   const parts = hostname.split(".");
@@ -21,9 +22,9 @@ function isPrivateIpv4(hostname) {
 }
 
 export function validateMonitor(monitor) {
-  if (!monitor || typeof monitor !== "object") throw new Error("Monitor configuration must be an object.");
+  if (!monitor || typeof monitor !== "object" || Array.isArray(monitor)) throw new Error("Monitor configuration must be an object.");
   if (typeof monitor.id !== "string" || !monitor.id.trim()) throw new Error("Monitor id is required.");
-  if (typeof monitor.name !== "string" || !monitor.name.trim()) throw new Error("Monitor name is required.");
+  if (typeof monitor.name !== "string" || !monitor.name.trim() || monitor.name.trim().length > 80) throw new Error("Monitor name is required and must not exceed 80 characters.");
   if (typeof monitor.enabled !== "boolean") throw new Error("Monitor enabled must be a boolean.");
   if (monitor.enabled === false) return { ...monitor, enabled: false };
 
@@ -45,11 +46,11 @@ export function validateMonitor(monitor) {
   const intervalMinutes = Number(monitor.intervalMinutes ?? 10);
   const timeoutSeconds = Number(monitor.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS);
   const expectedStatus = Number(monitor.expectedStatus ?? DEFAULT_EXPECTED_STATUS);
-  if (!Number.isInteger(intervalMinutes) || intervalMinutes !== 10) {
-    throw new Error("The Phase 3 scheduler currently supports a 10-minute interval.");
+  if (!Number.isInteger(intervalMinutes) || !SUPPORTED_INTERVALS.has(intervalMinutes)) {
+    throw new Error("Interval must be one of 1, 5, 10, 20, or 30 minutes.");
   }
-  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 10) {
-    throw new Error("Timeout must be a whole number between 1 and 10 seconds.");
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 30) {
+    throw new Error("Timeout must be a whole number between 1 and 30 seconds.");
   }
   if (!Number.isInteger(expectedStatus) || expectedStatus < 100 || expectedStatus > 599) {
     throw new Error("Expected HTTP status must be a whole number between 100 and 599.");
