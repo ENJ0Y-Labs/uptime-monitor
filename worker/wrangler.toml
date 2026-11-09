@@ -5,9 +5,9 @@ keep_vars = true
 
 [[d1_databases]]
 binding = "APIMON_DB"
-database_name = "uptime-monitor-db"
+database_name = "apimon-db"
 # Replace this placeholder with the database_id returned by: npx wrangler d1 create apimon-db
-database_id = "9d2c6541-b219-4000-90e8-c95c8408ce6a"
+database_id = "58a773e8-748c-441c-8a99-3896c27afa6b"
 migrations_dir = "migrations"
 
 [triggers]
