@@ -7,7 +7,7 @@ keep_vars = true
 binding = "APIMON_DB"
 database_name = "apimon-db"
 # Replace this placeholder with the database_id returned by: npx wrangler d1 create apimon-db
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "00000000000000000000000000000000"
 migrations_dir = "migrations"
 
 [triggers]
