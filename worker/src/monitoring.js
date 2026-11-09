@@ -8,12 +8,16 @@ function isPrivateIpv4(hostname) {
   if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return false;
   const octets = parts.map(Number);
   if (octets.some(value => value < 0 || value > 255)) return true;
-  const [a, b] = octets;
+  const [a, b, c] = octets;
   return a === 0 || a === 10 || a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a >= 224);
+    (a === 192 && (b === 0 || b === 168 || (b === 0 && c === 2))) ||
+    (a === 192 && b === 88 && c === 99) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224;
 }
 
 export function validateMonitor(monitor) {
