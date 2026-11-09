@@ -6,7 +6,7 @@ const SUPPORTED_INTERVALS = new Set([1, 5, 10, 20, 30]);
 
 function isPrivateIpv4(hostname) {
   const parts = hostname.split(".");
-  if (parts.length !== 4 || parts.some(part => !/^\\d{1,3}$/.test(part))) return false;
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return false;
   const octets = parts.map(Number);
   if (octets.some(value => value < 0 || value > 255)) return true;
   const [a, b, c] = octets;
