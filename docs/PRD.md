@@ -1,6 +1,6 @@
 # APIMON Product Requirements Document
 
-**Status:** Initial draft  
+**Status:** Initial draft; frontend prototype available  
 **Product:** APIMON  
 **Repository:** `ENJ0Y-Labs/uptime-monitor`
 
