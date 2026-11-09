@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkMonitor, loadMonitors, runMonitorBatch } from "../src/monitoring.js";
-import { runScheduledChecks } from "../src/index.js";
+import { checkMonitor, loadMonitors, validateMonitor, runMonitorBatch } from "../src/monitoring.js";
+import worker from "../src/index.js";
 
 const monitor = {
   id: "retailos-backend",
@@ -33,10 +33,13 @@ test("rejects local, private, credentialed, non-http and non-standard port URLs"
     "http://user:pass@example.com/health",
     "ftp://example.com/file",
     "https://example.com:8443/health"
-  ]) assert.throws(() => loadMonitors(JSON.stringify([{ ...monitor, url }])));
+  ]) assert.throws(() => validateMonitor({ ...monitor, url }));
 });
-test("rejects interval other than the Phase 3 ten-minute schedule", () => {
-  assert.throws(() => loadMonitors(JSON.stringify([{ ...monitor, intervalMinutes: 5 }])), /10-minute interval/);
+test("accepts all documented D1 scheduling intervals and rejects unsupported intervals", () => {
+  for (const intervalMinutes of [1, 5, 10, 20, 30]) {
+    assert.equal(validateMonitor({ ...monitor, intervalMinutes }).intervalMinutes, intervalMinutes);
+  }
+  assert.throws(() => validateMonitor({ ...monitor, intervalMinutes: 2 }), /1, 5, 10, 20, or 30/);
 });
 test("records a successful expected HTTP 200 response and UTC timestamp", async () => {
   const result = await checkMonitor(monitor, {
@@ -82,10 +85,12 @@ test("one failed monitor does not prevent later monitors from being checked", as
   assert.equal(results[0].status, "DOWN");
   assert.equal(results[1].status, "UP");
 });
-test("scheduled handler returns structured results", async () => {
-  const results = await runScheduledChecks({ APIMON_MONITORS: JSON.stringify([monitor]) }, {
-    fetchImpl: async () => new Response("ok", { status: 200 })
-  });
-  assert.equal(results.length, 1);
-  assert.equal(results[0].monitorId, monitor.id);
+test("health endpoint remains public", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/health"), {});
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, "ok");
+});
+test("monitor API rejects requests without the service token", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/api/monitors"), {});
+  assert.equal(response.status, 401);
 });
