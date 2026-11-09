@@ -4,8 +4,3 @@ compatibility_date = "2026-11-09"
 
 [triggers]
 crons = ["*/10 * * * *"]
-
-[vars]
-# Local/demo monitor configuration. Replace with your own public test endpoint.
-# Production configuration should be set in the Cloudflare Worker dashboard.
-APIMON_MONITORS = '[{"id":"retailos-backend","name":"RetailOS Backend","url":"https://retailos-server.onrender.com/health","enabled":true,"intervalMinutes":10,"timeoutSeconds":10,"expectedStatus":200}]'
