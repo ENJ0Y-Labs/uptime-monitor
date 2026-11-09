@@ -99,7 +99,7 @@ export async function claimDueMonitors(db, now = new Date().toISOString()) {
   for (const candidate of results) {
     const row = await db.prepare(`
       UPDATE monitors
-      SET next_check_at = datetime(?, '+' || interval_minutes || ' minutes')
+      SET next_check_at = strftime('%Y-%m-%dT%H:%M:%fZ', ?, '+' || interval_minutes || ' minutes')
       WHERE id = ? AND is_active = 1 AND next_check_at <= ?
       RETURNING *
     `).bind(now, candidate.id, now).first();
