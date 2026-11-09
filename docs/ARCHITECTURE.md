@@ -1,6 +1,6 @@
 # APIMON System Architecture
 
-**Status:** Proposed initial architecture
+**Status:** Phase 3 Worker implementation in progress
 
 ## 1. System components
 
@@ -16,7 +16,7 @@ The backend is not the recurring scheduler. Its availability must not determine 
 
 ### Worker — Cloudflare Workers
 
-The worker is the independent scheduled execution component. A Cron Trigger wakes it on a schedule. It retrieves due monitor work through a secure worker integration, performs bounded outbound HTTP checks, and persists results.
+The Worker is the independent scheduled execution component. Its Cron Trigger runs every 10 minutes (`*/10 * * * *`). It currently reads operator-managed monitor definitions from the temporary `APIMON_MONITORS` Worker binding, performs bounded HTTP GET checks, and emits structured result logs. It does not persist results yet.
 
 The worker must handle duplicate invocations and concurrent execution safely. It must not trust monitor URLs or configuration without validation.
 
@@ -38,7 +38,7 @@ PostgreSQL is the initial primary application datastore for accounts, monitor co
 
 The scheduler must not run as a background thread, Flask request hook, or process hosted inside the application being monitored. A sleeping or unavailable monitored service must not stop the scheduler from checking it.
 
-The worker must have an independent route to read due monitor configurations and write results. A later implementation decision must choose and document the exact integration mechanism, authentication, storage ownership, and failure behavior. Do not assume Cloudflare Workers can directly access a private PostgreSQL database without an explicitly configured secure connectivity solution.
+For Phase 3, monitor definitions are configured through the operator-managed `APIMON_MONITORS` JSON binding. This is separate from browser local storage: frontend monitor changes are not automatically registered with the Worker. Check results are structured logs only and are not durable. Phase 4 must replace this temporary configuration/logging path with durable storage and a secure worker-to-storage integration. Do not assume Cloudflare Workers can directly access a private PostgreSQL database without an explicitly configured secure connectivity solution.
 
 ## 4. Initial data concepts
 
@@ -53,7 +53,8 @@ Exact schemas and migration strategy are implementation decisions and must be do
 
 ## 5. Scheduling and execution
 
-- Default interval: 10 minutes.
+- Cron schedule: every 10 minutes (`*/10 * * * *`), UTC.
+- Temporary Phase 3 interval support: 10 minutes only.
 - Initial selectable intervals: 1, 5, 10, 20, and 30 minutes, subject to quotas and product limits.
 - Default timeout: 10 seconds.
 - Default method: GET.
@@ -61,7 +62,9 @@ Exact schemas and migration strategy are implementation decisions and must be do
 - Store timestamps in UTC.
 - Track next-due time and last execution.
 - Prevent overlapping duplicate checks for a monitor.
-- Apply concurrency controls and bounded retries.
+- Apply a bounded batch size (25 monitors) and per-request timeout.
+- Redirects are not followed.
+- Emit structured result logs; persistence is deferred to Phase 4.
 - Record scheduler execution errors separately from target failures.
 
 Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger strategy must be validated against Cloudflare plan limits and the required per-monitor interval semantics before production use. A single trigger can poll due work, but it must not assume every monitor is due at every trigger.
@@ -85,7 +88,11 @@ Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger st
 
 Deployments are separate. Each component must have documented environment variables, secrets, health checks, rollback instructions, and operational ownership before production launch.
 
-## 8. Open architecture decisions
+## 8. Phase 3 implementation boundary
+
+The Worker implementation is under `worker/`. It exports a scheduled handler and a minimal `/health` route. The Worker uses an operator-managed JSON binding until durable monitor storage is implemented. The current SSRF checks reject localhost, common private/reserved IPv4 ranges, IPv6 literal hosts, credentials, non-standard ports, and redirects. They do not fully eliminate DNS rebinding or all egress routing risks; keep monitor configuration operator-controlled until comprehensive SSRF defenses and authenticated monitor management are in place.
+
+## 9. Open architecture decisions
 
 These must be resolved before the relevant implementation phase:
 1. Worker-to-database integration approach.

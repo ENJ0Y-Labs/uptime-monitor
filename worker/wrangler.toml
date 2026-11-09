@@ -1,0 +1,7 @@
+name = "apimon-monitor-worker"
+main = "src/index.js"
+compatibility_date = "2026-11-09"
+keep_vars = true
+
+[triggers]
+crons = ["*/10 * * * *"]

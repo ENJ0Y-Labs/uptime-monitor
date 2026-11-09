@@ -67,4 +67,4 @@ Read [frontend/README.md](frontend/README.md) for prototype behavior and limitat
 
 ## Project status
 
-**Foundation / planning.** The repository currently contains product and engineering documentation. Application implementation has not started.
+**Phase 3 implementation in progress.** The frontend MVP has been merged. The Cloudflare Worker scheduled checker is implemented on its feature branch; it uses temporary operator-managed monitor configuration and structured logs until Phase 4 adds durable storage.
