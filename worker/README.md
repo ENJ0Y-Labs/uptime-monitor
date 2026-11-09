@@ -1,72 +1,119 @@
 # APIMON Cloudflare Worker
 
-Phase 3 scheduled monitoring engine.
+Phase 4 scheduled monitoring engine with Cloudflare D1 persistence.
 
 ## What it does
 
-- Runs independently through a Cloudflare Cron Trigger every 10 minutes.
-- Loads a temporary JSON monitor configuration from the `APIMON_MONITORS` Worker binding.
-- Sends HTTP GET requests with a maximum 10-second timeout.
-- Treats the configured expected status (default HTTP 200) as success.
-- Records response time in milliseconds and UTC timestamps.
-- Records unexpected statuses, timeouts, and connection failures as DOWN.
-- Prevents one target failure from stopping the remaining checks.
-- Emits one structured JSON log event per result.
-- Exposes `GET /health` for the Worker service itself.
+- Polls D1 every minute using a Cloudflare Cron Trigger.
+- Selects only active monitors whose `next_check_at` is due.
+- Supports monitor intervals of 1, 5, 10, 20, and 30 minutes.
+- Sends bounded HTTP GET requests (1–30 second configured timeout).
+- Treats only the configured expected HTTP status as UP.
+- Persists each completed check result and updates the monitor's last-check timestamp.
+- Stores timestamps as ISO 8601 UTC strings.
+- Provides authenticated monitor CRUD, pause/resume, and check-history routes.
+- Keeps `GET /health` public for service health checks.
 
-## Important Phase 3 limitation
+## D1 setup
 
-The temporary `APIMON_MONITORS` binding is an operator-managed JSON configuration, not a database. It does not read the frontend's browser local storage and it is not updated when a user adds a monitor in the frontend. Check results are emitted to Worker logs only and are not durable. Phase 4 must replace this temporary configuration/logging path with durable monitor and check-result storage.
+Requirements: Node.js 20+, npm, a Cloudflare account, and Wrangler 4.
 
-The Phase 3 schedule is every 10 minutes. To keep scheduling behavior honest and aligned with this Cron Trigger, the temporary worker configuration currently accepts only a 10-minute monitor interval. Other intervals require a different due-monitor scheduler strategy.
-
-## Local setup
-
-Requirements: Node.js 20+ and npm.
+From this directory:
 
 ```bash
-cd worker
 npm install
+npx wrangler login
+npm run db:create
+```
+
+Copy the returned D1 database ID into `database_id` in `wrangler.toml`, replacing `REPLACE_WITH_D1_DATABASE_ID`.
+
+Apply the migration locally and remotely:
+
+```bash
+npm run db:migrate:local
+npm run db:migrate:remote
+```
+
+The migration creates `monitors`, `check_results`, the foreign key, and indexes for due-monitor polling and recent history. The SQL uses `IF NOT EXISTS` for safe repeatability.
+
+## Local development
+
+Create `.dev.vars` from `.dev.vars.example` and set a random `APIMON_API_TOKEN` value of at least 32 characters. This file is ignored by Git.
+
+```bash
 npm test
 npm run dev
 ```
 
-The local Worker health endpoint is available at `http://localhost:8787/health`. A local scheduled event can be triggered with Wrangler's scheduled-event command:
+Apply local migrations before testing the API. The local D1 database is separate from production.
+
+Create a monitor:
 
 ```bash
-npx wrangler dev --test-scheduled
+curl -X POST http://localhost:8787/api/monitors \
+  -H "Authorization: Bearer YOUR_LOCAL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Example API","url":"https://example.com/health","intervalMinutes":5,"timeoutSeconds":10,"expectedStatus":200}'
 ```
 
-Then open `http://localhost:8787/__scheduled` in another terminal/browser request to trigger the local scheduled handler.
+List monitors:
 
-## Configure production
+```bash
+curl http://localhost:8787/api/monitors -H "Authorization: Bearer YOUR_LOCAL_TOKEN"
+```
 
-1. Create a Cloudflare account and authenticate Wrangler: `npx wrangler login`.
-2. Review `wrangler.toml` and confirm the monitor URL is an endpoint you own or are authorized to check.
-3. Set `APIMON_MONITORS` as a Worker variable in the Cloudflare dashboard, using the JSON array format shown in `wrangler.toml`.
-4. Deploy from this directory with `npm run deploy`.
-5. Confirm the Worker has the `*/10 * * * *` Cron Trigger.
-6. Inspect Worker invocation logs after a scheduled run and verify the structured result for each target.
+Read recent history:
 
-Do not commit credentials or secrets. The current RetailOS URL is public and contains no credential, but only use it with permission.
+```bash
+curl "http://localhost:8787/api/monitors/MONITOR_ID/checks?limit=50" \
+  -H "Authorization: Bearer YOUR_LOCAL_TOKEN"
+```
+
+## API routes
+
+All `/api/*` routes require `Authorization: Bearer <APIMON_API_TOKEN>`. The token is a service credential for trusted server-side clients only. Never put it in frontend JavaScript or browser storage.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/monitors` | List monitors |
+| POST | `/api/monitors` | Create a monitor |
+| GET | `/api/monitors/:id` | Retrieve a monitor |
+| PATCH | `/api/monitors/:id` | Update monitor configuration |
+| DELETE | `/api/monitors/:id` | Delete monitor and cascade its history |
+| POST | `/api/monitors/:id/pause` | Pause scheduled checks |
+| POST | `/api/monitors/:id/resume` | Resume scheduled checks immediately |
+| GET | `/api/monitors/:id/checks?limit=50` | Read recent check history |
+
+## Production deployment
+
+1. Replace the D1 database ID placeholder in `wrangler.toml`.
+2. Apply remote migrations: `npm run db:migrate:remote`.
+3. Set a strong production token: `npx wrangler secret put APIMON_API_TOKEN`.
+4. Deploy: `npm run deploy`.
+5. Confirm the every-minute Cron Trigger.
+6. Create a test monitor through the authenticated API.
+7. Wait for its due time and verify a row appears in `check_results`.
+8. Pause it and confirm later scheduled runs add no further rows.
+9. Redeploy and confirm existing records remain in D1.
+
+Do not set `APIMON_API_TOKEN` as a public `[vars]` value. Use Wrangler secrets.
 
 ## Result shape
 
-Each scheduled attempt emits a structured object with:
+Each check result stores `id`, `monitor_id`, `status` (UP/DOWN), nullable `http_status_code`, nullable `response_time_ms`, UTC `checked_at`, and nullable sanitized `error_category` / `error_message`.
 
-- `monitorId`, `monitorName`
-- `status`: `UP` or `DOWN`
-- `httpStatusCode`: integer or null
-- `responseTimeMs`: integer
-- `checkedAt`: ISO 8601 UTC
-- `errorCategory`, `errorMessage`: null on success; sanitized on failure
+## Boundaries and security
 
-## Security boundary
-
-The Worker rejects localhost, common private IPv4 ranges, IPv6 literal hosts, URL credentials, non-HTTP(S) schemes, non-standard ports, and fragments. Redirects are not followed. This reduces obvious SSRF paths but is not a complete defense against DNS rebinding or all provider-specific network routing behavior. The current configuration is operator-controlled, not user-submitted. Do not expose monitor creation to untrusted users until the full SSRF controls and authenticated service integration are implemented and reviewed.
+- The Worker API uses one shared service token, not end-user accounts or per-monitor ownership. Keep it behind trusted server-side integration.
+- URL validation blocks common private IPv4 ranges, localhost, IPv6 literal hosts, credentials, non-HTTP(S) schemes, non-standard ports, and fragments. Redirects are not followed. DNS rebinding and all provider-specific egress paths are not fully mitigated. Do not expose this API directly to untrusted users before a dedicated SSRF review.
+- D1 is durable storage for Worker monitor configuration and history. The React prototype still uses browser local storage and is not connected to this API.
+- Account ownership, frontend integration, incident processing, retention cleanup, and PostgreSQL synchronization are outside this issue.
 
 ## Tests
 
 ```bash
 npm test
 ```
+
+Node tests cover validation, response classification, timeouts, and API authentication. Use the local D1 migration and manual API steps to verify D1 CRUD, foreign-key cascade, scheduled polling, and persistence.
