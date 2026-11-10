@@ -1,4 +1,4 @@
-export const SUPPORTED_INTERVALS = [5, 10, 20, 30];
+export const SUPPORTED_INTERVALS = [1, 5, 10, 20, 30];
 export const SUPPORTED_TIMEOUTS = [5, 10, 15, 30];
 
 export function validateMonitor({ name, url, intervalMinutes, timeoutSeconds, expectedStatus }) {
