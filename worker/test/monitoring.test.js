@@ -85,12 +85,60 @@ test("one failed monitor does not prevent later monitors from being checked", as
   assert.equal(results[0].status, "DOWN");
   assert.equal(results[1].status, "UP");
 });
+const TEST_API_TOKEN = "test-only-apimon-token-0123456789abcdef";
+
+function testEnvironment(token) {
+  const configuredToken = arguments.length === 0 ? TEST_API_TOKEN : token;
+  return {
+    ...(configuredToken === undefined ? {} : { APIMON_API_TOKEN: configuredToken }),
+    APIMON_DB: { prepare: () => ({ all: async () => ({ results: [] }) }) }
+  };
+}
+
 test("health endpoint remains public", async () => {
   const response = await worker.fetch(new Request("https://worker.example/health"), {});
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).status, "ok");
+  assert.deepEqual(await response.json(), { service: "APIMON Worker", status: "ok" });
 });
+
 test("monitor API rejects requests without the service token", async () => {
-  const response = await worker.fetch(new Request("https://worker.example/api/monitors"), {});
+  const request = new Request("https://worker.example/api/monitors");
+  const response = await worker.fetch(request, testEnvironment());
   assert.equal(response.status, 401);
+});
+
+test("monitor API returns 401 for an invalid token", async () => {
+  const request = new Request("https://worker.example/api/monitors", {
+    headers: { Authorization: "Bearer not-the-test-token" }
+  });
+  const response = await worker.fetch(request, testEnvironment());
+  assert.equal(response.status, 401);
+});
+
+test("monitor API returns 401 for an incorrect authorization scheme", async () => {
+  const request = new Request("https://worker.example/api/monitors", {
+    headers: { Authorization: "Basic not-the-test-token" }
+  });
+  const response = await worker.fetch(request, testEnvironment());
+  assert.equal(response.status, 401);
+});
+
+test("monitor API grants access with the correct token", async () => {
+  const request = new Request("https://worker.example/api/monitors", {
+    headers: { Authorization: `Bearer ${TEST_API_TOKEN}` }
+  });
+  const response = await worker.fetch(request, testEnvironment());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { monitors: [] });
+});
+
+test("empty or missing configured secret fails securely", async () => {
+  for (const token of [undefined, ""]) {
+    const request = new Request("https://worker.example/api/monitors", {
+      headers: { Authorization: `Bearer ${TEST_API_TOKEN}` }
+    });
+    const response = await worker.fetch(request, testEnvironment(token));
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "Unauthorized" });
+  }
 });
