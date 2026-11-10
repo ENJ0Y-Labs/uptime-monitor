@@ -38,7 +38,7 @@ These are initial architecture decisions and may be revised through documented t
 
 ## Getting started
 
-The low-fidelity frontend prototype is available in `frontend/`. It currently uses browser-local demo data and does not call a backend or execute real checks.
+The APIMON dashboard is available in `frontend/`. It connects to the Cloudflare Worker API for monitor configuration and persisted check history. Production browser access is protected with Cloudflare Access; the local Vite proxy keeps the Worker service token server-side.
 
 To run it locally:
 
@@ -67,4 +67,4 @@ Read [frontend/README.md](frontend/README.md) for prototype behavior and limitat
 
 ## Project status
 
-**Phase 4 implementation in progress.** The frontend prototype and scheduled Cloudflare Worker are present. The Phase 4 feature branch adds Cloudflare D1 persistence, an authenticated Worker monitor API, and due-monitor scheduling. The frontend remains local-storage-only until its integration phase.
+**Phase 5 dashboard integration implementation.** The dashboard now uses the Worker API for monitor CRUD, status, check history, and response-time charts. Production authentication uses Cloudflare Access, while the service token remains server-side. Production Access, CORS, D1, and scheduled-check verification are required before this phase can be called deployed and complete.
