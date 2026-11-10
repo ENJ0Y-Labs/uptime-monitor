@@ -1,40 +1,39 @@
 # APIMON Frontend
 
-React + Vite monitor-configuration interface for the APIMON MVP.
+React + Vite dashboard connected to the Cloudflare Worker API.
 
-## Run locally
+## Local development
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+1. Start the Worker locally from the worker directory. Follow the D1 migration steps in worker/README.md.
+2. Copy worker/.dev.vars.example to worker/.dev.vars and set a local APIMON_API_TOKEN of at least 32 characters.
+3. Copy frontend/.env.example to frontend/.env.local.
+4. Put the same local token in frontend/.env.local as APIMON_API_TOKEN. Set APIMON_API_ORIGIN to http://127.0.0.1:8787.
+5. Run npm install and npm run dev from this directory.
 
-## Run validation tests
+The Vite development server proxies /api requests to the local Worker and adds the service token on the server side. The token is not prefixed with VITE_, is not bundled into browser JavaScript, and is not stored in browser storage.
 
-From the repository root:
+## Production configuration
 
-```bash
-cd frontend
-npm test
-```
+Set VITE_APIMON_API_BASE_URL to the public API hostname protected by Cloudflare Access. This value is a URL, not a secret.
 
-## Phase 2 functionality
+Protect the Worker API hostname and /api/* routes with a Cloudflare Access application. Restrict the Access policy to the intended operators. Also set these Worker secrets:
 
-- Add a monitor with a name and absolute HTTP/HTTPS URL.
-- Configure a supported interval (5, 10, 20, or 30 minutes).
-- Configure a supported timeout (5, 10, 15, or 30 seconds).
-- Configure the expected HTTP status (100–599; default 200).
-- List and search saved monitor configurations.
-- Edit, pause, resume, and delete a monitor.
-- Persist configuration in browser local storage for this frontend-only phase.
-- Show new and unchecked monitors as **Unknown**, never as UP.
+- APIMON_ALLOWED_EMAILS: comma-separated, exact email allowlist for dashboard access.
+- APIMON_ALLOWED_ORIGIN: the exact deployed dashboard origin, including scheme and port when applicable.
 
-## Explicit limitations
+The Worker checks the signed-in identity supplied through the Cloudflare Workers Access context and independently checks the email allowlist. Browser requests use Access credentials; they never send APIMON_API_TOKEN.
 
-This phase is configuration UI only. Browser local storage is temporary prototype persistence, not the future source of truth. The frontend does not send monitoring requests, schedule checks, verify target availability, calculate uptime, display real response times, or connect to the Worker/backend. Do not interpret an Active monitor as a healthy monitor. Live results will be implemented in later phases.
+Cloudflare Access must allow the browser's OPTIONS preflight requests to reach the Worker. The Worker permits preflight only for APIMON_ALLOWED_ORIGIN and returns no monitor data for those requests.
 
+## Dashboard behavior
 
-## Phase 4 integration boundary
+- Create, list, edit, pause, resume, and delete monitors through the Worker API.
+- Display latest persisted check status, last-check time, and response time.
+- View the latest 50 persisted check results for a selected monitor.
+- Draw the response-time line chart only from recorded responseTimeMs values.
+- Refresh monitor and history data on page load, manually, and every 60 seconds.
+- Display loading, empty, validation, authentication, network, and API error states.
+- Keep the last successfully loaded data visible when a refresh fails.
+- Never imply that refreshing the dashboard triggers a scheduled check.
 
-The Cloudflare Worker now has a D1-backed monitor API, but this frontend has not been connected to it yet. Existing browser-local monitors are not automatically migrated or synchronized to D1. Do not put the Worker service token in frontend code. A future authenticated Flask API or another trusted server-side integration must mediate user access.
+The Worker currently provides one Access-protected workspace, not per-user monitor ownership or a public multi-tenant account system.
