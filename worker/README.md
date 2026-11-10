@@ -76,6 +76,10 @@ npm test
 npm run dev
 ~~~
 
+The Worker package scripts explicitly select worker/wrangler.toml. This is important because the repository root also contains a separate wrangler.jsonc for frontend assets. The local allowed origin defaults to http://127.0.0.1:5173; change it only to the exact origin used for direct browser-to-Worker requests. Local dashboard requests use the same-origin Vite proxy instead, which removes the browser Origin header and adds the service token server-side.
+
+Local development authenticates through the Vite proxy's service token. It does not emulate Cloudflare Access identity; verify Access policies, identity allowlisting, and preflight reachability in the deployed environment.
+
 For the frontend, copy frontend/.env.example to frontend/.env.local. Put the same local token in APIMON_API_TOKEN and set APIMON_API_ORIGIN to http://127.0.0.1:8787. Run the frontend dev server. Its Vite proxy injects the token server-side and removes the browser Origin header; the token is not bundled into the browser.
 
 ## Production deployment

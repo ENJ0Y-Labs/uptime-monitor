@@ -1,4 +1,5 @@
-const configuredBaseUrl = import.meta.env?.VITE_APIMON_API_BASE_URL || '';
+const isDevelopment = Boolean(import.meta.env?.DEV);
+const configuredBaseUrl = isDevelopment ? '' : (import.meta.env?.VITE_APIMON_API_BASE_URL || '');
 
 export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = false) {
   const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
@@ -52,4 +53,4 @@ export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = f
   };
 }
 
-export const api = createApiClient(configuredBaseUrl, fetch, Boolean(import.meta.env?.DEV));
+export const api = createApiClient(configuredBaseUrl, fetch, isDevelopment);

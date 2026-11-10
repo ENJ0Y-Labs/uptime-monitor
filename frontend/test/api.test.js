@@ -53,6 +53,19 @@ test('fails clearly when the production API base URL is missing', async () => {
   await assert.rejects(api.listMonitors(), /VITE_APIMON_API_BASE_URL/);
 });
 
+test('uses the same-origin development proxy for local API requests', async () => {
+  let request;
+  const api = createApiClient('', async (url, options) => {
+    request = { url, options };
+    return response({ monitors: [] });
+  }, true);
+
+  assert.deepEqual(await api.listMonitors(), { monitors: [] });
+  assert.equal(request.url, '/api/monitors');
+  assert.equal(request.options.credentials, 'include');
+  assert.equal(request.options.headers.Authorization, undefined);
+});
+
 test('maps authentication and API errors to safe user-facing messages', async () => {
   const unauthorizedApi = createApiClient('https://api.example.com', async () => response({ error: 'Unauthorized' }, 401));
   await assert.rejects(unauthorizedApi.listMonitors(), /Access denied/);

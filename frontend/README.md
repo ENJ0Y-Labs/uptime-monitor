@@ -10,7 +10,9 @@ React + Vite dashboard connected to the Cloudflare Worker API.
 4. Put the same local token in frontend/.env.local as APIMON_API_TOKEN. Set APIMON_API_ORIGIN to http://127.0.0.1:8787.
 5. Run npm install and npm run dev from this directory.
 
-The Vite development server proxies /api requests to the local Worker and adds the service token on the server side. The token is not prefixed with VITE_, is not bundled into browser JavaScript, and is not stored in browser storage.
+In development, the dashboard always requests `/api` from the Vite origin. The Vite development server proxies these requests to `APIMON_API_ORIGIN` and adds the service token on the server side. Do not set `VITE_APIMON_API_BASE_URL` for local development; it is only used by production builds. The token is not bundled into browser JavaScript or stored in browser storage.
+
+Vite's environment-variable precedence applies: an `APIMON_API_TOKEN` inherited from the shell or operating system overrides the value in `.env.local`. If the local proxy returns 401, ensure the inherited value matches `worker/.dev.vars` or unset the conflicting value before starting Vite.
 
 ## Production configuration
 
