@@ -23,17 +23,38 @@ test("rejects malformed configuration and more than 25 monitors", () => {
   assert.throws(() => loadMonitors("{bad"), /valid JSON/);
   assert.throws(() => loadMonitors(JSON.stringify(Array.from({ length: 26 }, (_, i) => ({ ...monitor, id: String(i) })))), /cannot exceed/);
 });
-test("rejects local, private, credentialed, non-http and non-standard port URLs", () => {
+test("rejects local, private, reserved, credentialed, non-http and non-standard port URLs", () => {
   for (const url of [
     "http://localhost/health",
+    "http://localhost./health",
+    "http://service.local/health",
+    "http://service.internal/health",
     "http://127.0.0.1/health",
+    "http://2130706433/health",
     "http://10.0.0.2/health",
+    "http://169.254.169.254/latest/meta-data/",
     "http://192.168.1.2/health",
     "http://172.16.0.1/health",
+    "http://192.0.0.9/health",
+    "http://224.0.0.1/health",
+    "http://[::1]/health",
     "http://user:pass@example.com/health",
     "ftp://example.com/file",
-    "https://example.com:8443/health"
+    "https://example.com:8443/health",
+    "https://example.com:80/health",
+    "http://example.com:443/health"
   ]) assert.throws(() => validateMonitor({ ...monitor, url }));
+});
+test("requires an explicit approved hostname for production monitor registration", () => {
+  assert.throws(() => validateMonitor(monitor, { requireAllowedHost: true }), /allowlist is not configured/);
+  assert.throws(() => validateMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: "other.example.com"
+  }), /not approved/);
+  assert.equal(validateMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com"
+  }).url, monitor.url);
 });
 test("accepts all documented D1 scheduling intervals and rejects unsupported intervals", () => {
   for (const intervalMinutes of [1, 5, 10, 20, 30]) {
@@ -41,7 +62,6 @@ test("accepts all documented D1 scheduling intervals and rejects unsupported int
   }
   assert.throws(() => validateMonitor({ ...monitor, intervalMinutes: 2 }), /1, 5, 10, 20, or 30/);
 });
-
 test("revalidates persisted monitor targets immediately before fetching", async () => {
   let fetchCalled = false;
   const result = await checkMonitor({ ...monitor, url: "http://127.0.0.1/admin" }, {
@@ -55,7 +75,16 @@ test("revalidates persisted monitor targets immediately before fetching", async 
   assert.equal(result.errorCategory, "target_rejected");
   assert.equal(result.errorMessage, "The configured target failed APIMON safety validation.");
 });
-
+test("scheduled checks fail closed when the hostname allowlist is missing or mismatched", async () => {
+  let fetchCalled = false;
+  const result = await checkMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: "",
+    fetchImpl: async () => { fetchCalled = true; return new Response("unexpected", { status: 200 }); }
+  });
+  assert.equal(fetchCalled, false);
+  assert.equal(result.errorCategory, "target_rejected");
+});
 test("records a successful expected HTTP 200 response and UTC timestamp", async () => {
   const result = await checkMonitor(monitor, {
     fetchImpl: async () => new Response("ok", { status: 200 }),
@@ -100,13 +129,22 @@ test("one failed monitor does not prevent later monitors from being checked", as
   assert.equal(results[0].status, "DOWN");
   assert.equal(results[1].status, "UP");
 });
+
 const TEST_API_TOKEN = "test-only-apimon-token-0123456789abcdef";
+const TEST_ALLOWED_ORIGIN = "https://dashboard.example";
 
 function testEnvironment(token) {
   const configuredToken = arguments.length === 0 ? TEST_API_TOKEN : token;
   return {
     ...(configuredToken === undefined ? {} : { APIMON_API_TOKEN: configuredToken }),
-    APIMON_DB: { prepare: () => ({ all: async () => ({ results: [] }) }) }
+    APIMON_ALLOWED_ORIGIN: TEST_ALLOWED_ORIGIN,
+    APIMON_ALLOWED_TARGET_HOSTS: "retailos-server.onrender.com",
+    APIMON_DB: {
+      prepare: () => ({
+        all: async () => ({ results: [] }),
+        first: async () => ({ monitor_count: 0 })
+      })
+    }
   };
 }
 
@@ -114,6 +152,14 @@ test("health endpoint remains public", async () => {
   const response = await worker.fetch(new Request("https://worker.example/health"), {});
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { service: "APIMON Worker", status: "ok" });
+});
+
+test("readiness endpoint verifies the D1 binding and schema", async () => {
+  const response = await worker.fetch(new Request("https://worker.example/ready"), testEnvironment());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { service: "APIMON Worker", status: "ready", storage: "available" });
+  const unavailable = await worker.fetch(new Request("https://worker.example/ready"), {});
+  assert.equal(unavailable.status, 503);
 });
 
 test("monitor API rejects requests without the service token", async () => {
@@ -145,6 +191,52 @@ test("monitor API grants access with the correct token", async () => {
   const response = await worker.fetch(request, testEnvironment());
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { monitors: [] });
+});
+
+test("Cloudflare Access grants only an allowlisted identity", async () => {
+  const env = testEnvironment(undefined);
+  env.APIMON_ALLOWED_EMAILS = "operator@example.com";
+  const allowed = await worker.fetch(
+    new Request("https://worker.example/api/monitors"),
+    env,
+    { access: { getIdentity: async () => ({ email: "Operator@example.com" }) } }
+  );
+  assert.equal(allowed.status, 200);
+  const denied = await worker.fetch(
+    new Request("https://worker.example/api/monitors"),
+    env,
+    { access: { getIdentity: async () => ({ email: "outsider@example.com" }) } }
+  );
+  assert.equal(denied.status, 401);
+});
+
+test("CORS allows only the configured dashboard origin", async () => {
+  const allowed = await worker.fetch(new Request("https://worker.example/api/monitors", {
+    headers: { Origin: TEST_ALLOWED_ORIGIN, Authorization: `Bearer ${TEST_API_TOKEN}` }
+  }), testEnvironment());
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("Access-Control-Allow-Origin"), TEST_ALLOWED_ORIGIN);
+
+  const denied = await worker.fetch(new Request("https://worker.example/api/monitors", {
+    headers: { Origin: "https://attacker.example", Authorization: `Bearer ${TEST_API_TOKEN}` }
+  }), testEnvironment());
+  assert.equal(denied.status, 403);
+  assert.equal(denied.headers.get("Access-Control-Allow-Origin"), null);
+});
+
+test("CORS preflight returns no data and accepts only the configured origin", async () => {
+  const allowed = await worker.fetch(new Request("https://worker.example/api/monitors", {
+    method: "OPTIONS",
+    headers: { Origin: TEST_ALLOWED_ORIGIN, "Access-Control-Request-Method": "POST" }
+  }), testEnvironment());
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get("Access-Control-Allow-Origin"), TEST_ALLOWED_ORIGIN);
+
+  const denied = await worker.fetch(new Request("https://worker.example/api/monitors", {
+    method: "OPTIONS",
+    headers: { Origin: "https://attacker.example" }
+  }), testEnvironment());
+  assert.equal(denied.status, 403);
 });
 
 test("empty or missing configured secret fails securely", async () => {
