@@ -41,6 +41,21 @@ test("accepts all documented D1 scheduling intervals and rejects unsupported int
   }
   assert.throws(() => validateMonitor({ ...monitor, intervalMinutes: 2 }), /1, 5, 10, 20, or 30/);
 });
+
+test("revalidates persisted monitor targets immediately before fetching", async () => {
+  let fetchCalled = false;
+  const result = await checkMonitor({ ...monitor, url: "http://127.0.0.1/admin" }, {
+    fetchImpl: async () => { fetchCalled = true; return new Response("unexpected", { status: 200 }); },
+    now: () => new Date("2026-11-10T12:00:00.000Z")
+  });
+  assert.equal(fetchCalled, false);
+  assert.equal(result.status, "DOWN");
+  assert.equal(result.httpStatusCode, null);
+  assert.equal(result.responseTimeMs, null);
+  assert.equal(result.errorCategory, "target_rejected");
+  assert.equal(result.errorMessage, "The configured target failed APIMON's safety validation.");
+});
+
 test("records a successful expected HTTP 200 response and UTC timestamp", async () => {
   const result = await checkMonitor(monitor, {
     fetchImpl: async () => new Response("ok", { status: 200 }),
