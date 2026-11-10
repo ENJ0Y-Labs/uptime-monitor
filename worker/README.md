@@ -5,17 +5,18 @@ Scheduled monitoring engine and D1-backed monitor API.
 ## What it does
 
 - Polls D1 every minute using a Cloudflare Cron Trigger.
-- Selects active monitors whose next_check_at is due.
+- Selects active monitors whose `next_check_at` is due.
 - Sends bounded HTTP GET requests and records each result in D1.
 - Stores UTC timestamps, response times, HTTP status, and safe failure details.
 - Provides monitor CRUD, pause/resume, and check-history routes.
-- Keeps GET /health public at the Worker application layer.
+- Keeps `GET /health` public for liveness and `GET /ready` public for D1/schema readiness.
 
 ## API routes
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | /health | Public service health |
+| GET | /health | Public Worker liveness |
+| GET | /ready | Public D1 binding and schema readiness |
 | GET | /api/monitors | List monitors |
 | POST | /api/monitors | Create a monitor |
 | GET | /api/monitors/:id | Retrieve a monitor |
@@ -27,24 +28,26 @@ Scheduled monitoring engine and D1-backed monitor API.
 
 Create and update fields are name, url, intervalMinutes, timeoutSeconds, and expectedStatus. Supported intervals are 1, 5, 10, 20, and 30 minutes. The default interval is 10 minutes, timeout is 10 seconds, and expected status is 200.
 
-## Authentication model
+## Authentication and CORS
 
 The API supports two server-verified authentication paths:
 
-1. Cloudflare Access for the browser dashboard. Cloudflare authenticates the operator, and the Worker reads the authenticated identity through ctx.access.getIdentity(). The Worker also checks the identity email against APIMON_ALLOWED_EMAILS.
-2. APIMON_API_TOKEN for trusted server-to-server clients. This credential must remain on a trusted server and must never be embedded in browser code.
+1. Cloudflare Access for the browser dashboard. Cloudflare authenticates the operator, and the Worker reads the authenticated identity through `ctx.access.getIdentity()`. The Worker checks the identity email against `APIMON_ALLOWED_EMAILS`.
+2. `APIMON_API_TOKEN` for trusted server-to-server clients. This credential must remain on a trusted server and must never be embedded in browser code.
 
-The dashboard does not send APIMON_API_TOKEN. Do not add it to VITE_ variables or local storage.
+The dashboard does not send `APIMON_API_TOKEN`. Do not add it to `VITE_` variables or local storage.
 
-For production, create a Cloudflare Access application protecting the Worker API hostname and /api/* paths. Restrict its policy to the intended operators. Set these Worker secrets:
+For production, create a Cloudflare Access application protecting the Worker API hostname and `/api/*` paths. Restrict its policy to the intended operators. The Worker rejects any Origin other than the exact `APIMON_ALLOWED_ORIGIN`. CORS preflight requests receive an empty 204 only for that configured origin. Configure Access so OPTIONS requests reach the Worker without an interactive login redirect.
 
-- APIMON_ALLOWED_EMAILS: comma-separated, exact email allowlist.
-- APIMON_ALLOWED_ORIGIN: exact dashboard origin, including scheme and port if applicable.
-- APIMON_API_TOKEN: strong service credential for trusted server-to-server clients only.
+The service token remains a separate server-to-server authentication path. Do not expose it to the browser or configure an unprotected alternate browser route.
 
-The Access policy and Worker email allowlist are both enforced. Do not leave an alternate unprotected route that accepts browser requests. Cloudflare Access must allow OPTIONS preflight requests to reach the Worker because browsers do not send Access credentials with CORS preflight. The Worker validates the exact Origin and returns no data to preflight requests.
+## Target host allowlist and SSRF boundaries
 
-The Worker uses credentialed CORS for the one configured dashboard origin. Requests carrying a different Origin are rejected.
+Production monitor creation and updates require an explicit `APIMON_ALLOWED_TARGET_HOSTS` allowlist. The committed Wrangler configuration currently allows only `retailos-server.onrender.com`. Add other hostnames only through a reviewed change. The Worker rejects IP literals, localhost/local/reserved hostnames, credentials, non-HTTP(S) schemes, non-standard ports, and fragments.
+
+Every stored monitor is revalidated immediately before a scheduled fetch. Redirects are not followed; 3xx responses are recorded as failed checks. The response body is cancelled and not read.
+
+The allowlist is defense in depth, not a complete DNS-rebinding defense. A hostname can resolve to a private address after application-level validation, and the standard Worker fetch API does not expose a verified public-IP pin for the connection. A reviewed egress proxy or network control that resolves and pins globally routable addresses remains a security release gate. Until that exists, keep Access restricted to trusted operators and do not allow untrusted public users to register arbitrary targets.
 
 ## D1 setup
 
@@ -58,7 +61,7 @@ npx wrangler login
 npm run db:create
 ~~~
 
-Copy the returned D1 database ID into database_id in wrangler.toml.
+Confirm the returned D1 database ID belongs to the intended account before committing it to `worker/wrangler.toml`. Do not overwrite an existing production database ID without verifying its ownership.
 
 Apply migrations:
 
@@ -69,42 +72,42 @@ npm run db:migrate:remote
 
 ## Local development
 
-Create .dev.vars from .dev.vars.example and set a random APIMON_API_TOKEN of at least 32 characters. Apply the local D1 migration.
+Create `.dev.vars` from `.dev.vars.example` and set a random `APIMON_API_TOKEN` of at least 32 characters. Apply the local D1 migration.
 
 ~~~bash
 npm test
 npm run dev
 ~~~
 
-The Worker package scripts explicitly select worker/wrangler.toml. This is important because the repository root also contains a separate wrangler.jsonc for frontend assets. The local allowed origin defaults to http://127.0.0.1:5173; change it only to the exact origin used for direct browser-to-Worker requests. Local dashboard requests use the same-origin Vite proxy instead, which removes the browser Origin header and adds the service token server-side.
+The Worker package scripts explicitly select `worker/wrangler.toml`. This is important because the repository root also contains a separate `wrangler.jsonc` for frontend assets. The local allowed origin defaults to `http://127.0.0.1:5173`; change it only to the exact origin used for direct browser-to-Worker requests. Local dashboard requests use the same-origin Vite proxy instead, which removes the browser Origin header and adds the service token server-side.
 
-Local development authenticates through the Vite proxy's service token. It does not emulate Cloudflare Access identity; verify Access policies, identity allowlisting, and preflight reachability in the deployed environment.
-
-For the frontend, copy frontend/.env.example to frontend/.env.local. Put the same local token in APIMON_API_TOKEN and set APIMON_API_ORIGIN to http://127.0.0.1:8787. Run the frontend dev server. Its Vite proxy injects the token server-side and removes the browser Origin header; the token is not bundled into the browser.
+For the frontend, copy `frontend/.env.example` to `frontend/.env.local`. Put the same local token in `APIMON_API_TOKEN` and set `APIMON_API_ORIGIN` to `http://127.0.0.1:8787`. The token is injected by the Vite server proxy and never enters browser code.
 
 ## Production deployment
 
-1. Apply remote D1 migrations with npm run db:migrate:remote.
-2. Set APIMON_API_TOKEN using npx wrangler secret put APIMON_API_TOKEN.
-3. Set APIMON_ALLOWED_EMAILS and APIMON_ALLOWED_ORIGIN as Worker secrets.
-4. Configure Cloudflare Access for the Worker API hostname and restrict access to the intended operators.
-5. Configure the frontend build variable VITE_APIMON_API_BASE_URL with the Worker API origin. This is a public URL, not a secret.
-6. Configure the Access policy so OPTIONS preflight requests reach the Worker.
-7. Deploy with npm run deploy.
-8. Sign in through Cloudflare Access, create a monitor from the dashboard, and confirm it appears in D1.
-9. Wait for a scheduled check and confirm the result appears in the dashboard history and response-time chart.
-10. Pause, resume, and delete a monitor from the dashboard, then reload the page to verify the stored state.
+The GitHub Actions workflow deploys on pushes to `main` after Worker tests, frontend tests, and the frontend production build pass. Configure the required repository secrets and variables in `docs/DEPLOYMENT.md`. The workflow applies remote D1 migrations, writes the Worker secrets, deploys the Worker, builds the dashboard with the public API origin, and publishes Pages assets.
 
-Do not set APIMON_API_TOKEN as a public Wrangler variable or frontend build variable.
+Cloudflare Access policies, DNS/custom domains, and the Pages project must be configured separately. After deployment:
+
+1. Confirm `GET /health` returns HTTP 200.
+2. Confirm `GET /ready` returns HTTP 200 and `status: "ready"`.
+3. Verify the remote D1 migrations are applied.
+4. Sign in through Cloudflare Access and confirm an allowlisted identity can use monitor endpoints.
+5. Confirm unauthenticated and unlisted identities cannot access protected management operations.
+6. Confirm only the configured dashboard Origin receives CORS permission.
+7. Create the RetailOS monitor at `https://retailos-server.onrender.com/health` with a 10-minute interval, 10-second timeout, and expected HTTP 200.
+8. Verify the monitor and check history persist in D1.
+9. Turn off the dashboard device for at least 30 minutes and verify at least three scheduled check results after reopening APIMON.
+
+Do not set `APIMON_API_TOKEN` as a public Wrangler variable or frontend build variable.
 
 ## Result shape
 
 Each check result stores id, monitor_id, status (UP/DOWN), nullable http_status_code, nullable response_time_ms, UTC checked_at, and nullable sanitized error_category / error_message.
 
-## Boundaries and security
+## Boundaries
 
 - The Worker API currently manages one shared operator workspace. It does not implement end-user accounts or per-monitor ownership.
-- URL validation blocks common private IPv4 ranges, localhost, IPv6 literal hosts, credentials, non-HTTP(S) schemes, non-standard ports, and fragments. Redirects are not followed. DNS rebinding and all provider-specific egress paths are not fully mitigated. Do not expose monitor creation to untrusted public users before a dedicated SSRF review.
 - D1 stores monitor configuration and history. The dashboard displays persisted check results only; it does not trigger scheduled checks when refreshed.
 - Account ownership, PostgreSQL synchronization, incident processing, and retention cleanup remain outside this phase.
 
@@ -113,5 +116,3 @@ Each check result stores id, monitor_id, status (UP/DOWN), nullable http_status_
 ~~~bash
 npm test
 ~~~
-
-Tests cover Worker behavior, API authentication, Access identity allowlisting, and CORS origin enforcement. Production Access policies, CORS settings, and D1 persistence must still be verified in the deployed Cloudflare environment.
