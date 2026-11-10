@@ -237,7 +237,7 @@ export default function App() {
                 </div></td>
               </tr>;
             })}
-            {!loading && visible.length === 0 && <tr><td colSpan="6"><div className="empty-state"><span>⌕</span><b>{monitors.length ? 'No matching monitors' : 'No monitors yet'}</b><p>{monitors.length ? 'Try another search or filter.' : 'Add the RetailOS health endpoint to start monitoring it.'}</p>{monitors.length === 0 && <button className="button button-primary" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> Add monitor</button>}</div></td></tr>}
+            {!loading && visible.length === 0 && <tr><td colSpan="6"><div className="empty-state"><span>⌕</span><b>{monitors.length ? 'No matching monitors' : !API_CONFIGURED ? 'API not configured' : error ? 'Monitor data unavailable' : 'No monitors yet'}</b><p>{monitors.length ? 'Try another search or filter.' : !API_CONFIGURED ? 'Configure the Worker API URL to load monitor data.' : error ? 'APIMON could not confirm whether monitors exist. Retry the API request.' : 'Add the RetailOS health endpoint to start monitoring it.'}</p>{monitors.length === 0 && !error && API_CONFIGURED && <button className="button button-primary" onClick={openCreateModal}><Icon name="plus"/> Add monitor</button>}</div></td></tr>}
           </tbody></table></div>
           <div className="table-footer"><span>Showing <b>{visible.length}</b> of <b>{monitors.length}</b> monitors</span><span>{lastSyncedAt ? 'Last synced ' + formatDate(lastSyncedAt.toISOString()) : 'Waiting for API data'} · auto-refresh every 60 seconds</span></div>
         </section>
