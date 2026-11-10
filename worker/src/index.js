@@ -1,4 +1,4 @@
-import { checkMonitor, validateMonitor } from "./monitoring.js";
+import { checkMonitor, parseAllowedHosts, validateMonitor } from "./monitoring.js";
 import {
   claimDueMonitors,
   createMonitor,
@@ -81,6 +81,15 @@ async function handleRequest(request, env, ctx) {
   if (request.method === "GET" && url.pathname === "/health") {
     return json({ service: "APIMON Worker", status: "ok" });
   }
+  if (request.method === "GET" && url.pathname === "/ready") {
+    if (!env.APIMON_DB) return apiError("Monitoring storage is unavailable.", 503);
+    try {
+      await env.APIMON_DB.prepare("SELECT COUNT(*) AS monitor_count FROM monitors").first();
+      return json({ service: "APIMON Worker", status: "ready", storage: "available" });
+    } catch {
+      return apiError("Monitoring storage is not ready.", 503);
+    }
+  }
 
   if (!url.pathname.startsWith("/api/")) return apiError("Not found", 404);
   if (!await authorized(request, env, ctx)) return apiError("Unauthorized", 401);
@@ -98,7 +107,10 @@ async function handleRequest(request, env, ctx) {
       const body = await request.json();
       const id = crypto.randomUUID();
       const monitor = parseMonitorInput(body, id);
-      const valid = validateMonitor(monitor);
+      const valid = validateMonitor(monitor, {
+        allowedHosts: env.APIMON_ALLOWED_TARGET_HOSTS,
+        requireAllowedHost: true
+      });
       const created = await createMonitor(env.APIMON_DB, valid);
       return json({ monitor: created }, 201);
     }
@@ -120,7 +132,10 @@ async function handleRequest(request, env, ctx) {
     if (parts.length === 3 && request.method === "GET") return json({ monitor: existing });
     if (parts.length === 3 && request.method === "PATCH") {
       const body = await request.json();
-      const valid = validateMonitor(parseMonitorInput({ ...existing, ...body }, id));
+      const valid = validateMonitor(parseMonitorInput({ ...existing, ...body }, id), {
+        allowedHosts: env.APIMON_ALLOWED_TARGET_HOSTS,
+        requireAllowedHost: true
+      });
       return json({ monitor: await updateMonitor(env.APIMON_DB, id, valid) });
     }
     if (parts.length === 3 && request.method === "DELETE") {
@@ -130,7 +145,7 @@ async function handleRequest(request, env, ctx) {
     return apiError("Not found", 404);
   } catch (error) {
     if (error instanceof SyntaxError) return apiError("Request body must contain valid JSON.", 400);
-    if (error instanceof Error && /must|only|interval|timeout|status|URL|hostname|network|port|fragment|credentials/i.test(error.message)) {
+    if (error instanceof Error && /must|only|interval|timeout|status|URL|hostname|network|port|fragment|credentials|target/i.test(error.message)) {
       return apiError(error.message, 400);
     }
     console.error(JSON.stringify({ event: "apimon.api.error", message: "Monitor API operation failed." }));
@@ -163,6 +178,12 @@ export async function runScheduledChecks(env, dependencies = {}) {
     return [];
   }
 
+  const allowedHosts = parseAllowedHosts(env.APIMON_ALLOWED_TARGET_HOSTS);
+  if (allowedHosts.length === 0) {
+    console.error(JSON.stringify({ event: "apimon.scheduler.target_allowlist_missing", checkedAt: new Date().toISOString() }));
+    return [];
+  }
+
   const now = dependencies.now ?? (() => new Date());
   const due = await claimDueMonitors(env.APIMON_DB, now().toISOString());
   if (due.length === 0) {
@@ -172,7 +193,11 @@ export async function runScheduledChecks(env, dependencies = {}) {
 
   const results = [];
   for (const monitor of due) {
-    const result = await checkMonitor(monitor, dependencies);
+    const result = await checkMonitor(monitor, {
+      ...dependencies,
+      allowedHosts,
+      requireAllowedHost: true
+    });
     try {
       const persisted = await saveCheckResult(env.APIMON_DB, result);
       results.push(persisted);

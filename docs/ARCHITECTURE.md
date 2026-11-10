@@ -1,6 +1,6 @@
 # APIMON System Architecture
 
-**Status:** Phase 5 dashboard integration implemented on the feature branch; production Access, CORS, and live D1 verification remain pending
+**Status:** Phase 6 deployment hardening is implemented on the feature branch; Cloudflare account configuration, DNS/Access setup, production deployment, and live acceptance remain pending
 
 ## 1. System components
 
@@ -20,9 +20,9 @@ The Worker is the independent scheduled execution component. Its Cron Trigger po
 
 The worker must handle duplicate invocations and concurrent execution safely. It must not trust monitor URLs or configuration without validation.
 
-### Database — PostgreSQL
+### Database — Cloudflare D1
 
-PostgreSQL is the initial primary application datastore for accounts, monitor configuration, check results, incidents, and notification preferences. The architecture must define how the worker accesses durable state securely. Do not expose database credentials to the browser.
+The Phase 5 shared-workspace monitor API and scheduled Worker use Cloudflare D1 for monitor configuration, scheduling metadata, and check history. The database is bound to the Worker as `APIMON_DB`; the dashboard never connects to D1 directly. Account ownership and any future PostgreSQL integration are separate work.
 
 ## 2. High-level flow
 
@@ -62,15 +62,15 @@ Exact schemas and migration strategy are implementation decisions and must be do
 
 ## 5. Scheduling and execution
 
-- Cron schedule: every 10 minutes (`*/10 * * * *`), UTC.
-- Temporary Phase 3 interval support: 10 minutes only.
-- Initial selectable intervals: 1, 5, 10, 20, and 30 minutes, subject to quotas and product limits.
+- Cron schedule: every minute (`* * * * *`), UTC. The Worker polls due work from D1.
+- Per-monitor intervals: 1, 5, 10, 20, and 30 minutes. RetailOS is configured for 10 minutes.
+- Do not change the Worker Cron to every 10 minutes: it would break the supported 1- and 5-minute intervals.
 - Default timeout: 10 seconds.
 - Default method: GET.
 - Default expected response: HTTP 200.
 - Store timestamps in UTC.
 - Track next-due time and last execution.
-- Prevent overlapping duplicate checks for a monitor.
+- Claim due monitor rows using a conditional D1 update to avoid duplicate claims.
 - Apply a bounded batch size (25 monitors) and per-request timeout.
 - Redirects are not followed.
 - Persist check results in D1 and emit structured operational logs.
@@ -85,21 +85,24 @@ Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger st
 - Worker to target: constrained outbound HTTP client.
 - Database: private credentials and least-privilege access.
 - Never allow arbitrary user-controlled request headers or request bodies in the MVP.
-- Prevent SSRF across DNS resolution and redirects.
-- Avoid logging secrets or sensitive response bodies.
+- Reject IP literals, local/reserved hostnames, unsupported schemes/ports, credentials, and any hostname outside `APIMON_ALLOWED_TARGET_HOSTS`.
+- Revalidate persisted monitor configuration immediately before each fetch.
+- Do not follow redirects; record redirect responses as failed checks.
+- The hostname allowlist does not eliminate DNS rebinding. A reviewed egress proxy/network control that resolves and pins globally routable addresses remains a release gate before untrusted monitor registration.
+- Avoid logging secrets, full target URLs, or response bodies.
 
 ## 7. Deployment topology
 
-- Frontend: static web hosting.
-- Backend: Flask-compatible application hosting.
-- Worker: Cloudflare Workers with Cron Triggers.
-- Database: managed PostgreSQL.
+- Frontend: Cloudflare Pages.
+- API and scheduler: Cloudflare Workers.
+- Database: Cloudflare D1 bound as `APIMON_DB`.
+- Worker Cron Trigger: every minute; monitor-specific intervals are enforced from D1.
 
-Deployments are separate. Each component must have documented environment variables, secrets, health checks, rollback instructions, and operational ownership before production launch.
+The deployment workflow runs tests, applies remote D1 migrations, writes Worker secrets, deploys the Worker, builds the frontend with its public API origin, and publishes Pages assets. Cloudflare Access policies, DNS/custom domains, and the Pages project remain one-time account configuration. See `docs/DEPLOYMENT.md`.
 
 ## 8. Phase 3 implementation boundary
 
-The Worker implementation is under `worker/`. It exports a scheduled handler, a public `/health` route, and token-protected monitor CRUD/history routes. D1 schema and migrations live under `worker/migrations/`. The current SSRF checks reject localhost, common private/reserved IPv4 ranges, IPv6 literal hosts, credentials, non-standard ports, and redirects. They do not fully eliminate DNS rebinding or all egress routing risks; keep monitor configuration operator-controlled until comprehensive SSRF defenses and authenticated monitor management are in place.
+The Worker implementation is under `worker/`. It exports a scheduled handler, public `/health` and `/ready` routes, and Access/service-token protected monitor CRUD/history routes. D1 schema and migrations live under `worker/migrations/`. Production monitor creation requires an explicit hostname allowlist; the current allowlist contains only `retailos-server.onrender.com`. The Worker rejects IP literals, local/reserved hostnames, credentials, unsupported schemes/ports, and fragments, revalidates stored targets immediately before checks, and does not follow redirects. These controls do not fully eliminate DNS rebinding. Keep the Access workspace restricted to trusted operators until a reviewed egress control provides verified public-IP resolution and connection pinning.
 
 ## 9. Open architecture decisions
 

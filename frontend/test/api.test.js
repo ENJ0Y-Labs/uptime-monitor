@@ -43,6 +43,37 @@ test('encodes monitor IDs and returns persisted check history', async () => {
   assert.equal(result.results[0].responseTimeMs, 42);
 });
 
+test('sends each dashboard monitor operation to its Worker API route', async () => {
+  const requests = [];
+  const api = createApiClient('https://api.example.com', async (url, options) => {
+    requests.push({ url, options });
+    if (options.method === 'DELETE') return { ok: true, status: 204 };
+    if (url.endsWith('/pause') || url.endsWith('/resume') || options.method === 'PATCH') {
+      return response({ monitor: { id: 'monitor-1' } });
+    }
+    return response({ results: [] });
+  });
+  const values = { name: 'RetailOS', url: 'https://example.com/health' };
+
+  await api.updateMonitor('monitor-1', values);
+  await api.pauseMonitor('monitor-1');
+  await api.resumeMonitor('monitor-1');
+  await api.deleteMonitor('monitor-1');
+  await api.getChecks('monitor-1', 50);
+
+  assert.deepEqual(requests.map(({ url, options }) => [url, options.method || 'GET']), [
+    ['https://api.example.com/api/monitors/monitor-1', 'PATCH'],
+    ['https://api.example.com/api/monitors/monitor-1/pause', 'POST'],
+    ['https://api.example.com/api/monitors/monitor-1/resume', 'POST'],
+    ['https://api.example.com/api/monitors/monitor-1', 'DELETE'],
+    ['https://api.example.com/api/monitors/monitor-1/checks?limit=50', 'GET']
+  ]);
+  for (const { options } of requests) {
+    assert.equal(options.headers.Authorization, undefined);
+    assert.equal(options.credentials, 'include');
+  }
+});
+
 test('returns null for successful delete responses', async () => {
   const api = createApiClient('https://api.example.com', async () => ({ ok: true, status: 204 }));
   assert.equal(await api.deleteMonitor('monitor-1'), null);

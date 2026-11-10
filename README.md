@@ -73,4 +73,4 @@ Read [docs/PRD.md](docs/PRD.md) for product scope, [docs/ARCHITECTURE.md](docs/A
 
 ## Project status
 
-**Phase 5 dashboard integration implementation.** The dashboard now uses the Worker API for monitor CRUD, status, check history, and response-time charts. Production authentication uses Cloudflare Access, while the service token remains server-side. Production Access, CORS, D1, and scheduled-check verification are required before this phase can be called deployed and complete.
+**Phase 6 production hardening is implemented in [PR #13](https://github.com/ENJ0Y-Labs/uptime-monitor/pull/13), but production deployment is not verified.** Local Worker and frontend checks pass, and the configured D1 database and applied migration were inspected without modifying production data. Deployment remains blocked by missing Cloudflare deployment credentials and Pages configuration, unverified production Access/CORS/Cron settings, an unresponsive candidate RetailOS health endpoint, and the documented DNS-rebinding limitation. See the [Phase 6 implementation report](./PHASE-6-IMPLEMENTATION-REPORT.md) for evidence and outstanding acceptance criteria.
