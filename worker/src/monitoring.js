@@ -83,49 +83,30 @@ export async function checkMonitor(monitor, options = {}) {
   const now = options.now ?? (() => new Date());
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const checkedAt = now().toISOString();
+  let target;
+  try { target = validateMonitor(monitor); } catch {
+    return { monitorId: monitor?.id ?? null, monitorName: monitor?.name ?? null, status: "DOWN",
+      httpStatusCode: null, responseTimeMs: null, checkedAt, errorCategory: "target_rejected",
+      errorMessage: "The configured target failed APIMON safety validation." };
+  }
   const startedAt = monotonicNow();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("APIMON request timeout"), monitor.timeoutSeconds * 1000);
-
+  const timeout = setTimeout(() => controller.abort("APIMON request timeout"), target.timeoutSeconds * 1000);
   try {
-    const response = await fetchImpl(monitor.url, {
-      method: "GET",
-      headers: { "User-Agent": "APIMON-Monitor/1.0", "Accept": "*/*" },
-      redirect: "manual",
-      signal: controller.signal
-    });
+    const response = await fetchImpl(target.url, { method: "GET", headers: { "User-Agent": "APIMON-Monitor/1.0", "Accept": "*/*" }, redirect: "manual", signal: controller.signal });
     const responseTimeMs = Math.max(0, Math.round(monotonicNow() - startedAt));
-    const success = response.status === monitor.expectedStatus;
-    return {
-      monitorId: monitor.id,
-      monitorName: monitor.name,
-      status: success ? "UP" : "DOWN",
-      httpStatusCode: response.status,
-      responseTimeMs,
-      checkedAt,
-      errorCategory: success ? null : (response.status >= 300 && response.status < 400 ? "redirect_blocked" : "unexpected_http_status"),
-      errorMessage: success ? null : (response.status >= 300 && response.status < 400
-        ? "Redirect responses are not followed by APIMON."
-        : `Expected HTTP ${monitor.expectedStatus} but received HTTP ${response.status}.`)
-    };
+    const success = response.status === target.expectedStatus;
+    return { monitorId: target.id, monitorName: target.name, status: success ? "UP" : "DOWN", httpStatusCode: response.status,
+      responseTimeMs, checkedAt, errorCategory: success ? null : (response.status >= 300 && response.status < 400 ? "redirect_blocked" : "unexpected_http_status"),
+      errorMessage: success ? null : (response.status >= 300 && response.status < 400 ? "Redirect responses are not followed by APIMON." : "Expected HTTP " + target.expectedStatus + " but received HTTP " + response.status + ".") };
   } catch (error) {
     const responseTimeMs = Math.max(0, Math.round(monotonicNow() - startedAt));
     const timedOut = error?.name === "AbortError" || controller.signal.aborted;
-    return {
-      monitorId: monitor.id,
-      monitorName: monitor.name,
-      status: "DOWN",
-      httpStatusCode: null,
-      responseTimeMs,
-      checkedAt,
+    return { monitorId: target.id, monitorName: target.name, status: "DOWN", httpStatusCode: null, responseTimeMs, checkedAt,
       errorCategory: timedOut ? "timeout" : "connection_error",
-      errorMessage: timedOut ? `Request timed out after ${monitor.timeoutSeconds} seconds.` : "Could not connect to the target service."
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+      errorMessage: timedOut ? "Request timed out after " + target.timeoutSeconds + " seconds." : "Could not connect to the target service." };
+  } finally { clearTimeout(timeout); }
 }
-
 export async function runMonitorBatch(monitors, options = {}) {
   const results = [];
   for (const monitor of monitors) {
