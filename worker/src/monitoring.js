@@ -6,11 +6,11 @@ const SUPPORTED_INTERVALS = new Set([1, 5, 10, 20, 30]);
 
 export function parseAllowedHosts(value) {
   const values = Array.isArray(value) ? value : String(value || "").split(",");
-  return [...new Set(values.map(host => String(host).trim().toLowerCase().replace(/\\.$/, "")).filter(Boolean))];
+  return [...new Set(values.map(host => String(host).trim().toLowerCase().replace(/\.$/, "")).filter(Boolean))];
 }
 
 function isIpv4Literal(hostname) {
-  return /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(hostname);
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname);
 }
 
 function isNonPublicHostname(hostname) {
@@ -42,7 +42,7 @@ export function validateMonitor(monitor, options = {}) {
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only HTTP and HTTPS monitor URLs are supported.");
   if (!url.hostname || url.username || url.password) throw new Error("Monitor URL must have a hostname and cannot contain credentials.");
 
-  const hostname = url.hostname.toLowerCase().replace(/\\.$/, "");
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
   if (hostname.startsWith("[") || isIpv4Literal(hostname) || isNonPublicHostname(hostname)) {
     throw new Error("IP literals, local names, and non-public network targets are not permitted.");
   }
