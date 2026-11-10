@@ -38,7 +38,7 @@ PostgreSQL is the initial primary application datastore for accounts, monitor co
 
 The scheduler must not run as a background thread, Flask request hook, or process hosted inside the application being monitored. A sleeping or unavailable monitored service must not stop the scheduler from checking it.
 
-The Worker now reads and writes durable monitor and check-result records in D1. Its API is protected by a shared service token and must only be called by trusted server-side clients. The React frontend now reads and writes monitor configuration and check history through the Worker API. In production, Cloudflare Access authenticates the operator; the Worker reads the signed-in identity from ctx.access and checks it against APIMON_ALLOWED_EMAILS. The browser never receives APIMON_API_TOKEN. A local Vite development proxy adds the local service token on the server side. Monitor settings and check results remain in D1. Per-user ownership and PostgreSQL synchronization remain later work.
+The Worker now reads and writes durable monitor and check-result records in D1. Its API supports Cloudflare Access-authenticated dashboard requests and a shared service token for trusted server-to-server clients. The React frontend now reads and writes monitor configuration and check history through the Worker API. In production, Cloudflare Access authenticates the operator; the Worker reads the signed-in identity from ctx.access and checks it against APIMON_ALLOWED_EMAILS. The browser never receives APIMON_API_TOKEN. A local Vite development proxy adds the local service token on the server side. Monitor settings and check results remain in D1. Per-user ownership and PostgreSQL synchronization remain later work.
 
 ## Dashboard-to-Worker integration
 
