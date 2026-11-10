@@ -48,7 +48,7 @@ npm install
 npm run dev
 ```
 
-Read [frontend/README.md](frontend/README.md) for prototype behavior and limitations.
+Read [frontend/README.md](frontend/README.md) for the dashboard's local setup, Cloudflare Access configuration, and integration behavior.
 
 1. Read [AGENTS.md](AGENTS.md) before making changes.
 2. Read [docs/PRD.md](docs/PRD.md) for product scope.
