@@ -159,3 +159,19 @@ Use appropriate HTTP statuses:
 - `500`: unexpected server failure with a safe public message.
 
 Do not reveal whether another user's monitor exists.
+
+
+### Operational readiness
+
+| Method | Route | Authentication | Purpose |
+|---|---|---|---|
+| GET | /health | Public | Worker process liveness |
+| GET | /ready | Public | Verify the D1 binding and required monitor schema |
+
+`GET /ready` returns HTTP 200 only when the Worker can query the D1 `monitors` table. It returns HTTP 503 when the binding is absent or the schema is unavailable. Neither operational endpoint returns monitor data.
+
+### Production target policy
+
+Production create, update, and scheduled-check paths require `APIMON_ALLOWED_TARGET_HOSTS`. The Worker accepts only exact hostnames from this comma-separated allowlist. IP literals, localhost/local/reserved hostnames, credentials, non-HTTP(S) schemes, non-standard ports, and fragments are rejected. Stored monitor configuration is revalidated immediately before each fetch. Redirects are not followed.
+
+The exact-host allowlist is not a DNS-rebinding defense. A separate reviewed egress control that verifies and pins globally routable destination IPs is still required before arbitrary or untrusted target registration can be enabled.
