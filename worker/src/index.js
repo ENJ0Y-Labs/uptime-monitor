@@ -14,11 +14,53 @@ import {
 const json = (data, status = 200) => Response.json(data, { status });
 const apiError = (message, status) => json({ error: message }, status);
 
-function authorized(request, env) {
+function serviceTokenAuthorized(request, env) {
   const expected = env.APIMON_API_TOKEN;
   const supplied = request.headers.get("Authorization") || "";
   return typeof expected === "string" && expected.length >= 32 &&
-    supplied === `Bearer ${expected}`;
+    supplied === "Bearer " + expected;
+}
+
+async function accessUserAuthorized(env, ctx) {
+  const allowedEmails = String(env.APIMON_ALLOWED_EMAILS || "")
+    .split(",")
+    .map(email => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (!allowedEmails.length || typeof ctx?.access?.getIdentity !== "function") return false;
+
+  try {
+    const identity = await ctx.access.getIdentity();
+    const email = String(identity?.email || "").trim().toLowerCase();
+    return Boolean(email && allowedEmails.includes(email));
+  } catch {
+    return false;
+  }
+}
+
+async function authorized(request, env, ctx) {
+  return serviceTokenAuthorized(request, env) || await accessUserAuthorized(env, ctx);
+}
+
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin"
+  };
+}
+
+function withCors(response, origin, env) {
+  if (!origin || origin !== env.APIMON_ALLOWED_ORIGIN) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(corsHeaders(origin))) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 function parseMonitorInput(body, id) {
@@ -34,67 +76,80 @@ function parseMonitorInput(body, id) {
   };
 }
 
+async function handleRequest(request, env, ctx) {
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/health") {
+    return json({ service: "APIMON Worker", status: "ok" });
+  }
+
+  if (!url.pathname.startsWith("/api/")) return apiError("Not found", 404);
+  if (!await authorized(request, env, ctx)) return apiError("Unauthorized", 401);
+  if (!env.APIMON_DB) return apiError("Monitoring storage is unavailable.", 503);
+
+  try {
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] !== "api" || parts[1] !== "monitors") return apiError("Not found", 404);
+
+    if (parts.length === 2 && request.method === "GET") {
+      return json({ monitors: await listMonitors(env.APIMON_DB) });
+    }
+
+    if (parts.length === 2 && request.method === "POST") {
+      const body = await request.json();
+      const id = crypto.randomUUID();
+      const monitor = parseMonitorInput(body, id);
+      const valid = validateMonitor(monitor);
+      const created = await createMonitor(env.APIMON_DB, valid);
+      return json({ monitor: created }, 201);
+    }
+
+    const id = parts[2];
+    if (!id) return apiError("Monitor id is required.", 400);
+    const existing = await getMonitor(env.APIMON_DB, id);
+    if (!existing) return apiError("Monitor not found.", 404);
+
+    if (parts.length === 4 && parts[3] === "checks" && request.method === "GET") {
+      return json({ results: await listCheckResults(env.APIMON_DB, id, url.searchParams.get("limit")) });
+    }
+    if (parts.length === 4 && parts[3] === "pause" && request.method === "POST") {
+      return json({ monitor: await setMonitorActive(env.APIMON_DB, id, false) });
+    }
+    if (parts.length === 4 && parts[3] === "resume" && request.method === "POST") {
+      return json({ monitor: await setMonitorActive(env.APIMON_DB, id, true) });
+    }
+    if (parts.length === 3 && request.method === "GET") return json({ monitor: existing });
+    if (parts.length === 3 && request.method === "PATCH") {
+      const body = await request.json();
+      const valid = validateMonitor(parseMonitorInput({ ...existing, ...body }, id));
+      return json({ monitor: await updateMonitor(env.APIMON_DB, id, valid) });
+    }
+    if (parts.length === 3 && request.method === "DELETE") {
+      await deleteMonitor(env.APIMON_DB, id);
+      return new Response(null, { status: 204 });
+    }
+    return apiError("Not found", 404);
+  } catch (error) {
+    if (error instanceof SyntaxError) return apiError("Request body must contain valid JSON.", 400);
+    if (error instanceof Error && /must|only|interval|timeout|status|URL|hostname|network|port|fragment|credentials/i.test(error.message)) {
+      return apiError(error.message, 400);
+    }
+    console.error(JSON.stringify({ event: "apimon.api.error", message: "Monitor API operation failed." }));
+    return apiError("The request could not be completed.", 500);
+  }
+}
+
 export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") {
-      return json({ service: "APIMON Worker", status: "ok" });
+  async fetch(request, env, ctx) {
+    const origin = request.headers.get("Origin");
+    if (origin && origin !== env.APIMON_ALLOWED_ORIGIN) return apiError("Origin not allowed.", 403);
+
+    if (request.method === "OPTIONS") {
+      if (!origin || origin !== env.APIMON_ALLOWED_ORIGIN) return apiError("Origin not allowed.", 403);
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    if (!url.pathname.startsWith("/api/")) return apiError("Not found", 404);
-    if (!authorized(request, env)) return apiError("Unauthorized", 401);
-    if (!env.APIMON_DB) return apiError("Monitoring storage is unavailable.", 503);
-
-    try {
-      const parts = url.pathname.split("/").filter(Boolean);
-      if (parts[0] !== "api" || parts[1] !== "monitors") return apiError("Not found", 404);
-
-      if (parts.length === 2 && request.method === "GET") {
-        return json({ monitors: await listMonitors(env.APIMON_DB) });
-      }
-
-      if (parts.length === 2 && request.method === "POST") {
-        const body = await request.json();
-        const id = crypto.randomUUID();
-        const monitor = parseMonitorInput(body, id);
-        const valid = validateMonitor(monitor);
-        const created = await createMonitor(env.APIMON_DB, valid);
-        return json({ monitor: created }, 201);
-      }
-
-      const id = parts[2];
-      if (!id) return apiError("Monitor id is required.", 400);
-      const existing = await getMonitor(env.APIMON_DB, id);
-      if (!existing) return apiError("Monitor not found.", 404);
-
-      if (parts.length === 4 && parts[3] === "checks" && request.method === "GET") {
-        return json({ results: await listCheckResults(env.APIMON_DB, id, url.searchParams.get("limit")) });
-      }
-      if (parts.length === 4 && parts[3] === "pause" && request.method === "POST") {
-        return json({ monitor: await setMonitorActive(env.APIMON_DB, id, false) });
-      }
-      if (parts.length === 4 && parts[3] === "resume" && request.method === "POST") {
-        return json({ monitor: await setMonitorActive(env.APIMON_DB, id, true) });
-      }
-      if (parts.length === 3 && request.method === "GET") return json({ monitor: existing });
-      if (parts.length === 3 && request.method === "PATCH") {
-        const body = await request.json();
-        const valid = validateMonitor(parseMonitorInput({ ...existing, ...body }, id));
-        return json({ monitor: await updateMonitor(env.APIMON_DB, id, valid) });
-      }
-      if (parts.length === 3 && request.method === "DELETE") {
-        await deleteMonitor(env.APIMON_DB, id);
-        return new Response(null, { status: 204 });
-      }
-      return apiError("Not found", 404);
-    } catch (error) {
-      if (error instanceof SyntaxError) return apiError("Request body must contain valid JSON.", 400);
-      if (error instanceof Error && /must|only|interval|timeout|status|URL|hostname|network|port|fragment|credentials/i.test(error.message)) {
-        return apiError(error.message, 400);
-      }
-      console.error(JSON.stringify({ event: "apimon.api.error", message: "Monitor API operation failed." }));
-      return apiError("The request could not be completed.", 500);
-    }
+    const response = await handleRequest(request, env, ctx);
+    return withCors(response, origin, env);
   },
 
   async scheduled(controller, env, ctx) {

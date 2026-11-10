@@ -38,22 +38,28 @@ These are initial architecture decisions and may be revised through documented t
 
 ## Getting started
 
-The low-fidelity frontend prototype is available in `frontend/`. It currently uses browser-local demo data and does not call a backend or execute real checks.
+The APIMON dashboard is available in `frontend/`. It connects to the Cloudflare Worker API for monitor configuration and persisted check history. Production browser access is protected with Cloudflare Access; the local Vite proxy keeps the Worker service token server-side.
 
-To run it locally:
+Before starting, read [AGENTS.md](AGENTS.md), [worker/README.md](worker/README.md), and [frontend/README.md](frontend/README.md).
 
-```bash
+For local development, start the Worker first, configure its local D1 database and service token, then configure the frontend's server-side Vite proxy:
+
+~~~bash
+cd worker
+npm install
+npm run db:migrate:local
+npm run dev
+~~~
+
+In a second terminal, copy frontend/.env.example to frontend/.env.local, set APIMON_API_TOKEN to the same local token used by the Worker, then run:
+
+~~~bash
 cd frontend
 npm install
 npm run dev
-```
+~~~
 
-Read [frontend/README.md](frontend/README.md) for prototype behavior and limitations.
-
-1. Read [AGENTS.md](AGENTS.md) before making changes.
-2. Read [docs/PRD.md](docs/PRD.md) for product scope.
-3. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system boundaries.
-4. Read [docs/API.md](docs/API.md) for the initial API contract.
+Read [docs/PRD.md](docs/PRD.md) for product scope, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system boundaries, and [docs/API.md](docs/API.md) for the API contract.
 
 ## Development principles
 
@@ -67,4 +73,4 @@ Read [frontend/README.md](frontend/README.md) for prototype behavior and limitat
 
 ## Project status
 
-**Phase 4 implementation in progress.** The frontend prototype and scheduled Cloudflare Worker are present. The Phase 4 feature branch adds Cloudflare D1 persistence, an authenticated Worker monitor API, and due-monitor scheduling. The frontend remains local-storage-only until its integration phase.
+**Phase 5 dashboard integration implementation.** The dashboard now uses the Worker API for monitor CRUD, status, check history, and response-time charts. Production authentication uses Cloudflare Access, while the service token remains server-side. Production Access, CORS, D1, and scheduled-check verification are required before this phase can be called deployed and complete.

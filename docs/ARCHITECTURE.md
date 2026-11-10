@@ -1,6 +1,6 @@
 # APIMON System Architecture
 
-**Status:** Phase 4 D1 persistence implemented on the feature branch; frontend and account integration remain pending
+**Status:** Phase 5 dashboard integration implemented on the feature branch; production Access, CORS, and live D1 verification remain pending
 
 ## 1. System components
 
@@ -38,7 +38,16 @@ PostgreSQL is the initial primary application datastore for accounts, monitor co
 
 The scheduler must not run as a background thread, Flask request hook, or process hosted inside the application being monitored. A sleeping or unavailable monitored service must not stop the scheduler from checking it.
 
-The Worker now reads and writes durable monitor and check-result records in D1. Its API is protected by a shared service token and must only be called by trusted server-side clients. The React frontend still stores prototype monitor settings in browser local storage; those settings are not synchronized to D1. Account ownership and PostgreSQL synchronization remain later work.
+The Worker now reads and writes durable monitor and check-result records in D1. Its API supports Cloudflare Access-authenticated dashboard requests and a shared service token for trusted server-to-server clients. The React frontend now reads and writes monitor configuration and check history through the Worker API. In production, Cloudflare Access authenticates the operator; the Worker reads the signed-in identity from ctx.access and checks it against APIMON_ALLOWED_EMAILS. The browser never receives APIMON_API_TOKEN. A local Vite development proxy adds the local service token on the server side. Monitor settings and check results remain in D1. Per-user ownership and PostgreSQL synchronization remain later work.
+
+## Dashboard-to-Worker integration
+
+- The frontend base URL is configured with VITE_APIMON_API_BASE_URL.
+- Production browser requests use credentialed CORS and Cloudflare Access. The Worker accepts only the configured APIMON_ALLOWED_ORIGIN.
+- The Worker supports both allowlisted Cloudflare Access identities and a bearer service token for trusted server-side clients.
+- The frontend refreshes monitor data and recent history on load, on demand, and every 60 seconds. This refresh is read-only and does not invoke a scheduled check.
+- The dashboard's response-time chart is derived only from persisted check-result responseTimeMs values.
+- The current Access allowlist grants access to one shared workspace; it does not implement account registration or per-user monitor ownership.
 
 ## 4. Initial data concepts
 
