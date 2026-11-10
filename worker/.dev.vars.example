@@ -1,3 +1,2 @@
-# Copy this file to .dev.vars and replace the placeholder with a random secret.
-# Keep .dev.vars out of Git. Use the same value only in trusted server-side clients.
+# Local Worker service credential. Keep the actual .dev.vars file out of Git.
 APIMON_API_TOKEN=replace-with-a-random-secret-at-least-32-characters-long
