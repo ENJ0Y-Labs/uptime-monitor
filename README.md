@@ -40,20 +40,26 @@ These are initial architecture decisions and may be revised through documented t
 
 The APIMON dashboard is available in `frontend/`. It connects to the Cloudflare Worker API for monitor configuration and persisted check history. Production browser access is protected with Cloudflare Access; the local Vite proxy keeps the Worker service token server-side.
 
-To run it locally:
+Before starting, read [AGENTS.md](AGENTS.md), [worker/README.md](worker/README.md), and [frontend/README.md](frontend/README.md).
 
-```bash
+For local development, start the Worker first, configure its local D1 database and service token, then configure the frontend's server-side Vite proxy:
+
+~~~bash
+cd worker
+npm install
+npm run db:migrate:local
+npm run dev
+~~~
+
+In a second terminal, copy frontend/.env.example to frontend/.env.local, set APIMON_API_TOKEN to the same local token used by the Worker, then run:
+
+~~~bash
 cd frontend
 npm install
 npm run dev
-```
+~~~
 
-Read [frontend/README.md](frontend/README.md) for the dashboard's local setup, Cloudflare Access configuration, and integration behavior.
-
-1. Read [AGENTS.md](AGENTS.md) before making changes.
-2. Read [docs/PRD.md](docs/PRD.md) for product scope.
-3. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system boundaries.
-4. Read [docs/API.md](docs/API.md) for the initial API contract.
+Read [docs/PRD.md](docs/PRD.md) for product scope, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system boundaries, and [docs/API.md](docs/API.md) for the API contract.
 
 ## Development principles
 
