@@ -53,7 +53,7 @@ test("revalidates persisted monitor targets immediately before fetching", async 
   assert.equal(result.httpStatusCode, null);
   assert.equal(result.responseTimeMs, null);
   assert.equal(result.errorCategory, "target_rejected");
-  assert.equal(result.errorMessage, "The configured target failed APIMON's safety validation.");
+  assert.equal(result.errorMessage, "The configured target failed APIMON safety validation.");
 });
 
 test("records a successful expected HTTP 200 response and UTC timestamp", async () => {
