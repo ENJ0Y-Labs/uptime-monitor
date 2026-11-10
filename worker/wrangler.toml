@@ -1,15 +1,22 @@
 name = "apimon-monitor-worker"
 main = "src/index.js"
-compatibility_date = "2026-11-09"
+compatibility_date = "2026-11-10"
 keep_vars = true
+
+[observability]
+enabled = true
+
+[vars]
+# Explicit operator-approved hostname allowlist. Add entries only after security review.
+APIMON_ALLOWED_TARGET_HOSTS = "retailos-server.onrender.com"
 
 [[d1_databases]]
 binding = "APIMON_DB"
 database_name = "apimon-db"
-# Replace this placeholder with the database_id returned by: npx wrangler d1 create apimon-db
+# Confirm this ID belongs to the intended Cloudflare account before production deployment.
 database_id = "58a773e8-748c-441c-8a99-3896c27afa6b"
 migrations_dir = "migrations"
 
 [triggers]
-# Poll due monitors every minute; each monitor's interval is enforced in D1.
+# Poll due monitors every minute so all supported per-monitor intervals remain accurate.
 crons = ["* * * * *"]
