@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
+import { buildResponseTimeChart, fetchDashboardSnapshot, readCheckHistoryResponse, readMonitorResponse } from './dashboard-data.js';
 import { validateMonitor } from './monitor-validation.js';
 
 const INTERVALS = [1, 5, 10, 20, 30];
@@ -78,31 +79,29 @@ function MonitorModal({ monitor, onClose, onSave }) {
 }
 
 function ResponseTimeChart({ results }) {
-  const points = [...results].filter(item => item.responseTimeMs !== null && item.responseTimeMs !== undefined && Number.isFinite(Number(item.responseTimeMs))).sort((a, b) => new Date(a.checkedAt) - new Date(b.checkedAt));
+  const { points, line } = buildResponseTimeChart(results);
   if (!points.length) return <div className="chart-empty"><Icon name="chart"/><b>No response-time data yet</b><span>The chart appears after APIMON records checks with measurable response times.</span></div>;
-  const values = points.map(item => Number(item.responseTimeMs));
-  const min = Math.min(...values);
-  const range = Math.max(Math.max(...values) - min, 1);
-  const coords = points.map((item, index) => ({ x: points.length === 1 ? 300 : 18 + index / (points.length - 1) * 564, y: 132 - (Number(item.responseTimeMs) - min) / range * 104 }));
-  const line = coords.map(point => point.x + ',' + point.y).join(' ');
-  return <div className="response-chart-wrap"><div className="chart-summary"><span>Latest recorded response time</span><b>{formatLatency(values[values.length - 1])}</b></div>
+  return <div className="response-chart-wrap"><div className="chart-summary"><span>Latest recorded response time</span><b>{formatLatency(points[points.length - 1].responseTimeMs)}</b></div>
     <svg className="response-chart" viewBox="0 0 600 155" role="img" aria-label="Response time line chart from persisted check results">
       {[28, 80, 132].map(y => <line key={y} x1="18" y1={y} x2="582" y2={y} className="chart-grid-line"/>)}
       {points.length > 1 && <polyline points={line} className="response-line"/>}
-      {coords.map((point, index) => <circle key={points[index].id || index} cx={point.x} cy={point.y} r="4" className="response-point"><title>{formatDate(points[index].checkedAt) + ' · ' + formatLatency(points[index].responseTimeMs)}</title></circle>)}
+      {points.map((point, index) => <circle key={point.id || index} cx={point.x} cy={point.y} r="4" className="response-point"><title>{formatDate(point.checkedAt) + ' · ' + formatLatency(point.responseTimeMs)}</title></circle>)}
     </svg><div className="chart-axis-labels"><span>{formatDate(points[0].checkedAt)}</span><span>{formatDate(points[points.length - 1].checkedAt)}</span></div>
   </div>;
 }
 
-function HistoryModal({ monitor, results, onClose }) {
+function HistoryModal({ monitor, results, loading, error, onRetry, onClose }) {
+  const chronologicalResults = [...results].sort((left, right) => Date.parse(left.checkedAt) - Date.parse(right.checkedAt));
   return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <section className="modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
       <div className="modal-head"><div><span className="eyebrow">MONITOR HISTORY</span><h2 id="history-title">{monitor.name}</h2><p>{monitor.url}</p></div><button className="icon-button" onClick={onClose} aria-label="Close history"><Icon name="close"/></button></div>
+      {error && <div className="api-banner error-banner" role="alert"><span>{error}</span><button onClick={onRetry} disabled={loading}>Retry</button></div>}
+      {loading && <p role="status">Loading check history…</p>}
       <section className="history-chart-section"><div className="history-section-title"><h3>Response time</h3><span>Persisted check results only</span></div><ResponseTimeChart results={results}/></section>
       <section className="history-results"><div className="history-section-title"><h3>Recent checks</h3><span>{results.length} records</span></div>
-        {results.length ? <div className="history-table-wrap"><table><thead><tr><th>RESULT</th><th>CHECKED AT</th><th>HTTP</th><th>RESPONSE</th><th>DETAIL</th></tr></thead><tbody>
-          {results.map(item => <tr key={item.id}><td><span className={'status-badge ' + (item.status === 'UP' ? 'up-badge' : 'down-badge')}><i/>{item.status}</span></td><td>{formatDate(item.checkedAt)}</td><td>{item.httpStatusCode ?? '—'}</td><td>{formatLatency(item.responseTimeMs)}</td><td>{item.errorMessage || '—'}</td></tr>)}
-        </tbody></table></div> : <div className="history-no-results">No checks have been recorded for this monitor yet.</div>}
+        {chronologicalResults.length ? <div className="history-table-wrap"><table><thead><tr><th>RESULT</th><th>CHECKED AT</th><th>HTTP</th><th>RESPONSE</th><th>DETAIL</th></tr></thead><tbody>
+          {chronologicalResults.map(item => <tr key={item.id}><td><span className={'status-badge ' + (item.status === 'UP' ? 'up-badge' : 'down-badge')}><i/>{item.status}</span></td><td>{formatDate(item.checkedAt)}</td><td>{item.httpStatusCode ?? '—'}</td><td>{formatLatency(item.responseTimeMs)}</td><td>{item.errorMessage || '—'}</td></tr>)}
+        </tbody></table></div> : !loading && <div className="history-no-results">No checks have been recorded for this monitor yet.</div>}
       </section><div className="modal-actions"><button className="button button-quiet" onClick={onClose}>Close</button></div>
     </section>
   </div>;
@@ -114,6 +113,8 @@ export default function App() {
   const [modalMonitor, setModalMonitor] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [historyMonitor, setHistoryMonitor] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [toast, setToast] = useState('');
@@ -127,14 +128,9 @@ export default function App() {
     if (!API_CONFIGURED) { setLoading(false); return false; }
     if (!silent) setRefreshing(true);
     try {
-      const response = await api.listMonitors();
-      const remoteMonitors = response.monitors ?? [];
-      const histories = await Promise.all(remoteMonitors.map(async monitor => {
-        const history = await api.getChecks(monitor.id, 50);
-        return [monitor.id, history.results ?? []];
-      }));
-      setMonitors(remoteMonitors);
-      setCheckData(Object.fromEntries(histories));
+      const snapshot = await fetchDashboardSnapshot(api);
+      setMonitors(snapshot.monitors);
+      setCheckData(snapshot.checkData);
       setLastSyncedAt(new Date());
       setError('');
       return true;
@@ -171,20 +167,53 @@ export default function App() {
     setToast(message);
     window.setTimeout(() => setToast(''), 2500);
   }
+  async function loadHistory(monitor) {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const results = readCheckHistoryResponse(await api.getChecks(monitor.id, 50));
+      setCheckData(current => ({ ...current, [monitor.id]: results }));
+    } catch (historyError) {
+      setHistoryError(historyError.message || 'Could not load check history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+  function openHistory(monitor) {
+    setHistoryMonitor(monitor);
+    setHistoryError('');
+    loadHistory(monitor);
+  }
   async function saveMonitor(values) {
     const editing = Boolean(modalMonitor);
-    if (editing) await api.updateMonitor(modalMonitor.id, values);
-    else await api.createMonitor(values);
+    const savedMonitor = readMonitorResponse(editing
+      ? await api.updateMonitor(modalMonitor.id, values)
+      : await api.createMonitor(values));
+    setMonitors(current => editing
+      ? current.map(monitor => monitor.id === savedMonitor.id ? savedMonitor : monitor)
+      : [savedMonitor, ...current]);
     setModalOpen(false);
     setModalMonitor(null);
     await refresh({ silent: true });
-    notify(editing ? 'Monitor configuration updated.' : 'Monitor created.');
+    notify(editing ? 'Monitor configuration saved.' : 'Monitor created.');
   }
   async function runAction(monitor, action, message) {
     setBusyId(monitor.id);
     setError('');
     try {
-      await action(monitor.id);
+      const result = await action(monitor.id);
+      if (action === api.deleteMonitor) {
+        setMonitors(current => current.filter(item => item.id !== monitor.id));
+        setCheckData(current => {
+          const next = { ...current };
+          delete next[monitor.id];
+          return next;
+        });
+        if (historyMonitor?.id === monitor.id) setHistoryMonitor(null);
+      } else {
+        const updatedMonitor = readMonitorResponse(result);
+        setMonitors(current => current.map(item => item.id === updatedMonitor.id ? updatedMonitor : item));
+      }
       await refresh({ silent: true });
       notify(message);
     } catch (actionError) {
@@ -230,7 +259,7 @@ export default function App() {
                 <td className="config-cell">{monitor.intervalMinutes} min · {monitor.timeoutSeconds}s · HTTP {monitor.expectedStatus}</td>
                 <td><StatusBadge monitor={monitor} latest={latest}/></td><td className="last-check">{formatDate(latest?.checkedAt || monitor.lastCheckedAt)}</td><td className="latency">{formatLatency(latest?.responseTimeMs)}</td>
                 <td><div className="row-actions">
-                  <button title="View check history" aria-label={'View history for ' + monitor.name} onClick={() => setHistoryMonitor(monitor)}><Icon name="history"/></button>
+                  <button title="View check history" aria-label={'View history for ' + monitor.name} onClick={() => openHistory(monitor)}><Icon name="history"/></button>
                   <button title="Edit monitor" aria-label={'Edit ' + monitor.name} onClick={() => { setModalMonitor(monitor); setModalOpen(true); }}><Icon name="edit"/></button>
                   <button title={monitor.enabled ? 'Pause monitor' : 'Resume monitor'} aria-label={(monitor.enabled ? 'Pause ' : 'Resume ') + monitor.name} disabled={busyId === monitor.id} onClick={() => runAction(monitor, monitor.enabled ? api.pauseMonitor : api.resumeMonitor, monitor.enabled ? 'Monitor paused.' : 'Monitor resumed.')}>{monitor.enabled ? <Icon name="pause"/> : <Icon name="play"/>}</button>
                   <button title="Delete monitor" aria-label={'Delete ' + monitor.name} disabled={busyId === monitor.id} onClick={() => deleteMonitor(monitor)}><Icon name="trash"/></button>
@@ -245,7 +274,7 @@ export default function App() {
       </div>
     </main>
     {modalOpen && <MonitorModal monitor={modalMonitor} onClose={() => { setModalOpen(false); setModalMonitor(null); }} onSave={saveMonitor}/>}
-    {historyMonitor && <HistoryModal monitor={historyMonitor} results={checkData[historyMonitor.id] ?? []} onClose={() => setHistoryMonitor(null)}/>}
+    {historyMonitor && <HistoryModal monitor={historyMonitor} results={checkData[historyMonitor.id] ?? []} loading={historyLoading} error={historyError} onRetry={() => loadHistory(historyMonitor)} onClose={() => setHistoryMonitor(null)}/>}
     {toast && <div className="toast"><Icon name="check"/>{toast}</div>}
   </div>;
 }
