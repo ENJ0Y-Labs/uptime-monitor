@@ -1,6 +1,6 @@
 # APIMON System Architecture
 
-**Status:** Phase 4 D1 persistence implemented on the feature branch; frontend and account integration remain pending
+**Status:** Phase 5 dashboard integration implemented on the feature branch; production Access, CORS, and live D1 verification remain pending
 
 ## 1. System components
 
