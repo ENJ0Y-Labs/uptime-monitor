@@ -79,7 +79,7 @@ jobs:
           test -n "$APIMON_ALLOWED_ORIGIN" || { echo "Missing APIMON_ALLOWED_ORIGIN variable"; exit 1; }
           test -n "$APIMON_API_BASE_URL" || { echo "Missing APIMON_API_BASE_URL variable"; exit 1; }
           test -n "$CLOUDFLARE_PAGES_PROJECT_NAME" || { echo "Missing CLOUDFLARE_PAGES_PROJECT_NAME variable"; exit 1; }
-          node --input-type=module -e 'for (const key of ["APIMON_ALLOWED_ORIGIN", "APIMON_API_BASE_URL"]) { const value = process.env[key]; const url = new URL(value); if (url.protocol !== "https:" || url.origin !== value.replace(/\\/$/, "")) throw new Error(key + " must be an HTTPS origin without a path or trailing slash"); }'
+          node --input-type=module -e 'for (const key of ["APIMON_ALLOWED_ORIGIN", "APIMON_API_BASE_URL"]) { const value = process.env[key]; const url = new URL(value); if (url.protocol !== "https:" || url.origin !== value) throw new Error(key + " must be an HTTPS origin without a path or trailing slash"); }'
       - name: Apply production D1 migrations
         run: npm run db:migrate:remote
         working-directory: worker
