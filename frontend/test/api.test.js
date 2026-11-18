@@ -97,9 +97,22 @@ test('uses the same-origin development proxy for local API requests', async () =
   assert.equal(request.options.headers.Authorization, undefined);
 });
 
-test('maps authentication and API errors to safe user-facing messages', async () => {
-  const unauthorizedApi = createApiClient('https://api.example.com', async () => response({ error: 'Unauthorized' }, 401));
-  await assert.rejects(unauthorizedApi.listMonitors(), /Access denied/);
+test('provides actionable local proxy credentials guidance for 401', async () => {
+  const localApi = createApiClient('', async () => response({ error: 'Unauthorized' }, 401), true);
+  await assert.rejects(localApi.listMonitors(), /APIMON_API_TOKEN.*frontend\/\.env\.local.*worker\/\.dev\.vars/);
+});
+
+test('provides Cloudflare Access guidance for production 401', async () => {
+  const productionApi = createApiClient('https://api.example.com', async () => response({ error: 'Unauthorized' }, 401));
+  await assert.rejects(productionApi.listMonitors(), /Cloudflare Access.*APIMON_ALLOWED_EMAILS/);
+});
+
+test('explains 403 separately from authentication failures', async () => {
+  const api = createApiClient('https://api.example.com', async () => response({ error: 'Origin not allowed' }, 403));
+  await assert.rejects(api.listMonitors(), /blocked.*403.*Access policy.*APIMON_ALLOWED_ORIGIN/);
+});
+
+test('maps other API errors to safe user-facing messages', async () => {
   const failedApi = createApiClient('https://api.example.com', async () => response({ error: 'Storage unavailable' }, 503));
   await assert.rejects(failedApi.listMonitors(), /Storage unavailable/);
 });
