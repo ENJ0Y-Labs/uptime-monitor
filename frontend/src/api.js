@@ -33,8 +33,14 @@ export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = f
     }
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Access denied. Sign in through the APIMON Cloudflare Access page or ask the workspace administrator for access.');
+      if (response.status === 401) {
+        const message = allowRelativeUrl
+          ? 'APIMON rejected the local proxy credentials (401). Confirm APIMON_API_TOKEN in frontend/.env.local matches worker/.dev.vars. Check for an inherited shell variable overriding the local file, then restart Vite.'
+          : 'Cloudflare Access did not authenticate this request (401). Sign in to the protected Worker API and confirm your email is included in APIMON_ALLOWED_EMAILS.';
+        throw new Error(message);
+      }
+      if (response.status === 403) {
+        throw new Error('APIMON blocked this request (403). Check the Cloudflare Access policy and APIMON_ALLOWED_ORIGIN configuration.');
       }
       throw new Error(payload?.error || 'APIMON API request failed (' + response.status + ').');
     }
