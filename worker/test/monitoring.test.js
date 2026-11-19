@@ -193,21 +193,15 @@ test("monitor API grants access with the correct token", async () => {
   assert.deepEqual(await response.json(), { monitors: [] });
 });
 
-test("Cloudflare Access grants only an allowlisted identity", async () => {
+test("Cloudflare Access identity alone cannot authorize the Worker API", async () => {
   const env = testEnvironment(undefined);
   env.APIMON_ALLOWED_EMAILS = "operator@example.com";
-  const allowed = await worker.fetch(
+  const response = await worker.fetch(
     new Request("https://worker.example/api/monitors"),
     env,
-    { access: { getIdentity: async () => ({ email: "Operator@example.com" }) } }
+    { access: { getIdentity: async () => ({ email: "operator@example.com" }) } }
   );
-  assert.equal(allowed.status, 200);
-  const denied = await worker.fetch(
-    new Request("https://worker.example/api/monitors"),
-    env,
-    { access: { getIdentity: async () => ({ email: "outsider@example.com" }) } }
-  );
-  assert.equal(denied.status, 401);
+  assert.equal(response.status, 401);
 });
 
 test("CORS allows only the configured dashboard origin", async () => {
