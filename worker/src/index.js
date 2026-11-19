@@ -1,4 +1,4 @@
-import { checkMonitor, parseAllowedHosts, validateMonitor } from "./monitoring.js";
+import { checkMonitor, parseAllowedHostsSet, validateMonitor } from "./monitoring.js";
 import {
   claimDueMonitors,
   createMonitor,
