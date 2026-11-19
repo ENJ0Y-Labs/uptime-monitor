@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from './api.js';
+import { api, setApiToken } from './api.js';
 import { buildResponseTimeChart, fetchDashboardSnapshot, readCheckHistoryResponse, readMonitorResponse } from './dashboard-data.js';
 import { validateMonitor } from './monitor-validation.js';
 
@@ -123,8 +123,13 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [busyId, setBusyId] = useState('');
+  const [authenticated, setAuthenticated] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
+    if (!authenticated) return false;
     if (!API_CONFIGURED) { setLoading(false); return false; }
     if (!silent) setRefreshing(true);
     try {
@@ -141,13 +146,14 @@ export default function App() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [authenticated]);
 
   useEffect(() => {
+    if (!authenticated) return undefined;
     refresh();
     const timer = window.setInterval(() => refresh({ silent: true }), 60000);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [authenticated, refresh]);
 
   const latestFor = monitor => checkData[monitor.id]?.[0] ?? null;
   const counts = useMemo(() => ({
@@ -228,19 +234,67 @@ export default function App() {
   }
   function openCreateModal() { setModalMonitor(null); setModalOpen(true); }
 
+  async function authenticate(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+    setApiToken(tokenInput);
+    try {
+      const snapshot = await fetchDashboardSnapshot(api);
+      setMonitors(snapshot.monitors);
+      setCheckData(snapshot.checkData);
+      setLastSyncedAt(new Date());
+      setAuthenticated(true);
+      setTokenInput('');
+    } catch (authFailure) {
+      setApiToken('');
+      setAuthError(authFailure.message || 'APIMON could not verify this API token.');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function logout() {
+    setApiToken('');
+    setAuthenticated(false);
+    setMonitors([]);
+    setCheckData({});
+    setError('');
+    setAuthError('');
+    setLastSyncedAt(null);
+  }
+
+  if (!API_CONFIGURED) {
+    return <main className="auth-screen"><section className="auth-card"><span className="brand-mark">A</span><span className="eyebrow">APIMON SETUP</span><h1>API configuration required</h1><p>Set VITE_APIMON_API_BASE_URL to the deployed Worker API origin and rebuild the dashboard.</p></section></main>;
+  }
+
+  if (!authenticated) {
+    return <main className="auth-screen"><section className="auth-card">
+      <span className="brand-mark">A</span><span className="eyebrow">APIMON WORKSPACE</span><h1>Connect to APIMON</h1>
+      <p>Enter the API token configured as <code>APIMON_API_TOKEN</code> on your Cloudflare Worker. The token stays in this tab's memory and is cleared when you refresh or sign out.</p>
+      <form className="auth-form" onSubmit={authenticate}>
+        <label htmlFor="apimon-api-token">API token</label>
+        <input id="apimon-api-token" type="password" value={tokenInput} onChange={event => setTokenInput(event.target.value)} autoComplete="off" spellCheck="false" required placeholder="Paste your APIMON API token"/>
+        {authError && <p className="form-error" role="alert">{authError}</p>}
+        <button className="button button-primary" type="submit" disabled={authLoading || !tokenInput.trim()}>{authLoading ? 'Connecting…' : 'Connect securely'}</button>
+      </form>
+      <small className="auth-footnote">Requests use Authorization: Bearer. No Cloudflare Access email identity or browser cookies are required by the Worker API.</small>
+    </section></main>;
+  }
+
   return <div className="app-shell">
     <aside className="sidebar">
       <a className="brand" href="#" aria-label="APIMON home"><span className="brand-mark">A</span><span>APIMON<span className="brand-dot">.</span><small>STATUS, WITHOUT GUESSWORK.</small></span></a>
-      <div className="workspace-label">WORKSPACE</div><div className="workspace-switch"><span className="workspace-avatar">A</span><span><b>APIMON Workspace</b><small>Cloudflare Access protected</small></span></div>
+      <div className="workspace-label">WORKSPACE</div><div className="workspace-switch"><span className="workspace-avatar">A</span><span><b>APIMON Workspace</b><small>Bearer token protected</small></span></div>
       <div className="nav-label">MONITORING</div><nav className="side-nav"><button className="active" type="button"><Icon name="clock"/>Monitors<span className="nav-count">{counts.total}</span></button></nav>
-      <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">i</span><b>Live monitoring data</b><p>Monitor settings and check history are loaded from the Worker API.</p><a href="https://github.com/ENJ0Y-Labs/uptime-monitor" target="_blank" rel="noreferrer">Project repository ↗</a></div><div className="profile-row"><div className="profile-avatar">A</div><span><b>APIMON</b><small>Protected workspace</small></span></div></div>
+      <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">i</span><b>Live monitoring data</b><p>Monitor settings and check history are loaded from the Worker API.</p><a href="https://github.com/ENJ0Y-Labs/uptime-monitor" target="_blank" rel="noreferrer">Project repository ↗</a></div><div className="profile-row"><div className="profile-avatar">A</div><span><b>APIMON</b><small>Token-authenticated workspace</small></span></div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div><div className="top-actions"><span className="live-pill"><i/> WORKER API</span><div className="profile-avatar small-avatar">A</div></div></header>
+      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div><div className="top-actions"><span className="live-pill"><i/> WORKER API</span><button className="button button-quiet" onClick={logout}>Sign out</button><div className="profile-avatar small-avatar">A</div></div></header>
       <div className="page-content">
         <div className="page-heading"><div><span className="eyebrow">APIMON WORKSPACE</span><h1>Monitors</h1><p>Manage endpoints and review their real monitoring results.</p></div><div className="heading-actions"><button className="button button-outline" onClick={() => refresh()} disabled={refreshing}><Icon name="refresh"/>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="button button-primary" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> Add monitor</button></div></div>
         {error && <div className="api-banner error-banner" role="alert"><span className="demo-banner-icon">!</span><span><b>API request failed.</b> {error}</span><button onClick={() => refresh()}>Retry</button></div>}
-        {!API_CONFIGURED && <div className="api-banner" role="status"><span className="demo-banner-icon">i</span><span><b>API configuration required.</b> Set VITE_APIMON_API_BASE_URL to the deployed Worker API URL and rebuild. Never put the Worker service token in browser variables.</span></div>}
+        {!API_CONFIGURED && <div className="api-banner" role="status"><span className="demo-banner-icon">i</span><span><b>API configuration required.</b> Set VITE_APIMON_API_BASE_URL to the deployed Worker API URL and rebuild. Enter the API token when connecting; it is not bundled into the app.</span></div>}
         <section className="stats-grid">
           <article className="stat-card"><div className="stat-top"><span>Total monitors</span><span className="stat-icon neutral"><Icon name="clock"/></span></div><strong>{counts.total}</strong><small>Stored in APIMON D1</small></article>
           <article className="stat-card"><div className="stat-top"><span>Operational</span><span className="stat-icon green"><Icon name="check"/></span></div><strong>{counts.up}</strong><small>Latest recorded check is UP</small></article>
