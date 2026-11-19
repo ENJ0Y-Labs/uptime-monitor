@@ -135,7 +135,7 @@ function isBlockedTld(hostname) {
  * @returns {Set} Set of allowed hostnames (lowercase, trimmed, without trailing dot)
  */
 export function parseAllowedHostsSet(value) {
-  const values = Array.isArray(value) ? value : String(value || "").split(",");
+  const values = value instanceof Set ? [...value] : Array.isArray(value) ? value : String(value || "").split(",");
   return new Set(
     values
       .map((host) => String(host).trim().toLowerCase().replace(/\.$/, ""))
