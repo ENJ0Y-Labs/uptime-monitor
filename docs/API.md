@@ -136,7 +136,7 @@ Monitor responses include id, name, url, intervalMinutes, timeoutSeconds, expect
 
 Each persisted result includes id, monitorId, status (UP or DOWN), httpStatusCode, responseTimeMs, checkedAt (UTC), errorCategory, and errorMessage. The history endpoint returns newest results first. The dashboard uses the first result as the latest recorded status and uses persisted responseTimeMs values for the response-time chart.
 
-The dashboard refreshes data on page load, on user request, and every 60 seconds. Refreshing the dashboard does not trigger a scheduled check.
+After successful token authentication, the dashboard refreshes data on load, on user request, and every 60 seconds. Refreshing the dashboard does not trigger a scheduled check.
 
 ### Bearer authentication and CORS deployment requirements
 
