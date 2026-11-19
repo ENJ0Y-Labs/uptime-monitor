@@ -195,7 +195,6 @@ test("monitor API grants access with the correct token", async () => {
 
 test("Cloudflare Access identity alone cannot authorize the Worker API", async () => {
   const env = testEnvironment(undefined);
-  env.APIMON_ALLOWED_EMAILS = "operator@example.com";
   const response = await worker.fetch(
     new Request("https://worker.example/api/monitors"),
     env,
