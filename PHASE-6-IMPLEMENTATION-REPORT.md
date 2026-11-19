@@ -178,3 +178,24 @@ Record the actual start/end times and check evidence when performed. Do not mark
 ## 12. Final Status
 
 **BLOCKED:** A critical endpoint dependency and DNS-rebinding security gate prevent safe production rollout. Required deployment credentials and production Pages/Access/Cron configuration are also unavailable or unverified. Local tests and CI passed, and remote D1 was inspected read-only, but production deployment and the offline acceptance test were not completed.
+
+---
+
+## 13. PR #17 CI Repair Addendum — 2026-11-19
+
+The initial PR #17 CI run ([run #20](https://github.com/ENJ0Y-Labs/uptime-monitor/actions/runs/44490316289)) failed in both jobs. The Worker job exposed a Set/Array allowlist mismatch, missing destination-screening result handling, and invalid test fixtures. The frontend job exposed a corrupted `frontend/vite.config.js` containing NULL bytes.
+
+The repair:
+- Corrected hostname allowlist lookup to use Set semantics consistently and exported the parser used by the scheduled Worker.
+- Added syntax validation and private/reserved range screening for an explicitly supplied destination IP.
+- Made `checkMonitor()` return a clear `dnsRebindingWarning`; when no resolved IP is supplied, it states that runtime DNS-rebinding protection is not enforced.
+- Corrected the new tests so their monitor fixtures satisfy the existing validation contract, and asserted that unsafe supplied IPs are rejected before a fetch.
+- Restored `frontend/vite.config.js` from the valid version on `main`.
+
+**Security limitation:** This preflight screening does not perform DNS resolution and does not pin Cloudflare Worker's outbound `fetch()` connection to the screened IP. It must not be represented as complete runtime DNS-rebinding protection. The network-level egress-control release gate remains open.
+
+**Verification:** [PR #17 CI run #21](https://github.com/ENJ0Y-Labs/uptime-monitor/actions/runs/44490807150) completed successfully:
+- Worker tests: **38/38 passed**.
+- Frontend tests: **23/23 passed**.
+- Frontend production build: **passed**.
+- Both GitHub Actions jobs: **success**.
