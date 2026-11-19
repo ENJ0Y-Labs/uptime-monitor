@@ -249,85 +249,91 @@ test("empty or missing configured secret fails securely", async () => {
     assert.deepEqual(await response.json(), { error: "Unauthorized" });
   }
 });
-test("DNS-rebinding protection rejects private IPs via resolvedIp option", async () => {
-  const monitor = { id: "dns-rebinding-test", name: "DNS Rebinding Test", url: "https://example.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
-  const resultV4 = await checkMonitor(monitor, {
+test("rejects private IPv4 destinations supplied for preflight validation", async () => {
+  let fetchCalled = false;
+  const result = await checkMonitor(monitor, {
     resolvedIp: "192.168.1.1",
     requireAllowedHost: true,
-    allowedHosts: "example.com"
+    allowedHosts: "retailos-server.onrender.com",
+    fetchImpl: async () => { fetchCalled = true; return new Response("ok", { status: 200 }); }
   });
-  assert.equal(resultV4.dnsRebindingWarning?.message?.includes("private"), true || resultV4.dnsRebindingWarning !== undefined);
-  const resultLoopback = await checkMonitor(monitor, {
+  assert.equal(fetchCalled, false);
+  assert.equal(result.status, "DOWN");
+  assert.equal(result.errorCategory, "target_rejected");
+  assert.match(result.dnsRebindingWarning.message, /private\/reserved/);
+});
+
+test("rejects IPv4 loopback destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
     resolvedIp: "127.0.0.1",
     requireAllowedHost: true,
-    allowedHosts: "example.com"
+    allowedHosts: "retailos-server.onrender.com"
   });
-  assert.equal(resultLoopback.dnsRebindingWarning?.message?.includes("private") || resultLoopback.dnsRebindingWarning?.message?.includes("loopback"), true || resultLoopback.dnsRebindingWarning !== undefined);
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /Loopback/);
 });
 
-test("DNS-rebinding protection rejects IPv6 unique local addresses via resolvedIp option", async () => {
-  const monitor = { id: "dns-rebinding-test2", name: "DNS Rebinding Test 2", url: "https://example2.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
-  const resultULA = await checkMonitor(monitor, {
+test("rejects IPv6 unique-local destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
     resolvedIp: "fc00::1",
     requireAllowedHost: true,
-    allowedHosts: "example2.com"
+    allowedHosts: "retailos-server.onrender.com"
   });
-  assert.equal(resultULA.dnsRebindingWarning?.message?.includes("private") || resultULA.dnsRebindingWarning?.message?.includes("ULA"), true || resultULA.dnsRebindingWarning !== undefined);
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /unique local/);
 });
 
-test("DNS-rebinding protection rejects loopback IPv6 addresses via resolvedIp option", async () => {
-  const monitor = { id: "dns-rebinding-test3", name: "DNS Rebinding Test 3", url: "https://example3.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
-  const resultLoopback6 = await checkMonitor(monitor, {
+test("rejects IPv6 loopback destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
     resolvedIp: "::1",
     requireAllowedHost: true,
-    allowedHosts: "example3.com"
+    allowedHosts: "retailos-server.onrender.com"
   });
-  assert.equal(resultLoopback6.dnsRebindingWarning?.message?.includes("loopback") || resultLoopback6.dnsRebindingWarning?.message?.includes("unspecified"), true || resultLoopback6.dnsRebindingWarning !== undefined);
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /loopback/);
 });
 
-test("DNS-rebinding warning included in check results when resolvedIp is provided", async () => {
-  const monitor = { id: "dns-rebinding-test4", name: "DNS Rebinding Test 4", url: "https://example4.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
-  const result = await checkMonitor(monitor, {
-    resolvedIp: "10.0.0.1",
-    requireAllowedHost: true,
-    allowedHosts: "example4.com"
-  });
-  assert(result.dnsRebindingWarning !== undefined, "dnsRebindingWarning should be defined when resolvedIp is provided");
-  if (result.dnsRebindingWarning.message) {
-    assert.ok(result.dnsRebindingWarning.message.includes("private") || result.dnsRebindingWarning.message.includes("reserved") || result.dnsRebindingWarning.message.includes("DNS rebinding"), "Warning should mention private/resolved/DNS rebinding");
-  }
-});
-
-test("checkMonitor without resolvedIp documents the DNS-rebinding limitation", async () => {
-  const monitor = { id: "dns-rebinding-test5", name: "DNS Rebinding Test 5", url: "https://example5.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+test("includes an explicit DNS-rebinding limitation when no resolved IP is available", async () => {
   const result = await checkMonitor(monitor, {
     requireAllowedHost: true,
-    allowedHosts: "example5.com"
+    allowedHosts: "retailos-server.onrender.com",
+    fetchImpl: async () => new Response("ok", { status: 200 })
   });
-  if (result.dnsRebindingWarning) {
-    assert.ok(result.dnsRebindingWarning.message.includes("Worker environment") || result.dnsRebindingWarning.message.includes("egress") || result.dnsRebindingWarning.message.includes("network-level"), "Warning should document Worker runtime limitation");
-  }
+  assert.equal(result.status, "UP");
+  assert.equal(result.dnsRebindingWarning.level, "warning");
+  assert.match(result.dnsRebindingWarning.message, /not enforced at runtime/);
+  assert.match(result.dnsRebindingWarning.message, /Worker environment/);
 });
 
 test("validateMonitor rejects IP literal hostnames", () => {
-  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://192.168.1.1/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
-  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://127.0.0.1/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
-  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://[::1]/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
+  for (const url of [
+    "http://192.168.1.1/health",
+    "http://127.0.0.1/health",
+    "http://[::1]/health"
+  ]) {
+    assert.throws(() => validateMonitor({
+      id: "test",
+      name: "Test",
+      url,
+      enabled: true,
+      intervalMinutes: 10,
+      timeoutSeconds: 10,
+      expectedStatus: 200
+    }), /IP literals/);
+  }
 });
 
-test("validateMonitor allows approved hostnames in allowlist", () => {
-  const result = validateMonitor({ id: "test", name: "Test", url: "https://example.com/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }, {
+test("validateMonitor accepts approved hostnames using a Set allowlist", () => {
+  const result = validateMonitor(monitor, {
     requireAllowedHost: true,
-    allowedHosts: "example.com"
+    allowedHosts: new Set(["retailos-server.onrender.com"])
   });
-  assert.ok(result.validated, "Should mark monitor as validated");
-  assert.equal(result.hostname, "example.com", "Hostname should be example.com");
-  assert.ok(result.allowedHosts.has("example.com"), "Allowlist should contain example.com");
+  assert.equal(result.hostname, undefined);
 });
 
-test("validateMonitor rejects unapproved hostnames when requireAllowedHost is true", () => {
-  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "https://unapproved.com/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }, {
+test("validateMonitor rejects hostnames outside a Set allowlist", () => {
+  assert.throws(() => validateMonitor(monitor, {
     requireAllowedHost: true,
-    allowedHosts: "example.com"
+    allowedHosts: new Set(["other.example.com"])
   }), /not approved/);
 });
