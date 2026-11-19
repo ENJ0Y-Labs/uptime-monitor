@@ -1,5 +1,7 @@
 # SECURITY ARCHITECTURE DECISION
 
+> **Current authentication update (2026-11-19):** The Cloudflare Access browser-authentication design described in this historical decision has been superseded by PR #18. Protected Worker API routes now require `Authorization: Bearer <APIMON_API_TOKEN>`. `APIMON_ALLOWED_EMAILS` and `ctx.access` are no longer used. Do not protect the Worker API hostname with Cloudflare Access. See `docs/API.md` and `docs/DEPLOYMENT.md` for the current contract.
+
 ## 1. Executive Summary
 
 Cloudflare Workers runtime **cannot provide enforceable DNS-rebinding protection** at the application level. The application code has no access to or control over the resolved IP of outbound `fetch()` calls — Cloudflare's platform-level proxy mediates DNS resolution, and the resolved IP is not available to the Worker.

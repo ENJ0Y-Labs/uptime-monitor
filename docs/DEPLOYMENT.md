@@ -16,18 +16,15 @@ This runbook deploys the static dashboard to Cloudflare Pages and the scheduled 
 2. Create the Cloudflare Pages project. Use the exact project name in the GitHub repository variable `CLOUDFLARE_PAGES_PROJECT_NAME`.
 3. Deploy the Worker once through the GitHub workflow after configuring its secrets and variables. The Worker name is `apimon-monitor-worker`.
 4. Assign a dedicated HTTPS hostname to the Worker and a separate HTTPS hostname to Pages. The dashboard hostname must exactly match `APIMON_ALLOWED_ORIGIN`; the API hostname must exactly match the origin in `APIMON_API_BASE_URL`.
-5. Create a Cloudflare Access self-hosted application for the Worker API hostname and protect `/api/*`. Add an Allow policy only for the intended operator email identities. Do not expose the Worker API hostname through an unprotected alternate route.
-6. Configure Access so CORS `OPTIONS` preflight requests for `/api/*` can reach the Worker without an interactive login redirect. The Worker only returns an empty 204 response for the exact configured dashboard origin; all other origins are rejected.
-7. Confirm the Access-protected request reaches the Worker with `ctx.access` populated. The Worker checks the authenticated identity against `APIMON_ALLOWED_EMAILS`. The public `/health` and `/ready` endpoints disclose only service readiness, not monitor data.
-8. Configure the Pages custom domain and DNS. Confirm the deployed dashboard is served over HTTPS.
+5. Do not create a Cloudflare Access application for the Worker API hostname. Remove any existing Access application or policy that intercepts requests to this hostname; the Worker must receive requests directly so it can validate the Authorization bearer token.
+6. Configure the Pages custom domain and DNS. Confirm the deployed dashboard is served over HTTPS.
 
 ## GitHub Actions configuration
 
 Add these repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`: scoped to the intended account, with Workers Scripts edit, D1 edit, and Cloudflare Pages edit permissions.
-- `APIMON_API_TOKEN`: a random server-to-server token of at least 32 characters. It is not a browser credential.
-- `APIMON_ALLOWED_EMAILS`: comma-separated exact operator email allowlist.
+- `APIMON_API_TOKEN`: a random bearer token of at least 32 characters. The dashboard operator enters this token in the connection screen; it is not included in the frontend build.
 
 Add these repository variables:
 
@@ -36,9 +33,9 @@ Add these repository variables:
 - `APIMON_API_BASE_URL`: HTTPS Worker API origin, without a path or trailing slash.
 - `APIMON_ALLOWED_ORIGIN`: exact HTTPS Pages dashboard origin, without a path or trailing slash.
 
-The deploy workflow first runs Worker tests, frontend tests, and the frontend production build. It then validates required settings, applies remote D1 migrations, writes the Worker secrets, deploys the Worker, builds the dashboard with the public API origin, and publishes the Pages assets. The service token, Access email allowlist, and allowed origin are written as Worker secrets. The browser receives only the public API origin through `VITE_APIMON_API_BASE_URL`.
+The deploy workflow first runs Worker tests, frontend tests, and the frontend production build. It then validates required settings, applies remote D1 migrations, writes the Worker secrets, deploys the Worker, builds the dashboard with the public API origin, and publishes the Pages assets. The service token and allowed origin are written as Worker secrets. The browser receives only the public API origin through `VITE_APIMON_API_BASE_URL`.
 
-The workflow does not create Access applications/policies, custom domains, DNS records, or the Pages project. Those are Cloudflare account-level setup tasks and must be completed manually before production can be considered protected.
+The workflow does not create or remove Access applications/policies, custom domains, DNS records, or the Pages project. Ensure the Worker API hostname is not protected by Cloudflare Access, then complete custom-domain and Pages setup manually.
 
 ## Manual deployment
 
@@ -49,7 +46,6 @@ cd worker
 npm ci
 npm run db:migrate:remote
 printf '%s' "$APIMON_API_TOKEN" | npx wrangler secret put APIMON_API_TOKEN --config wrangler.toml
-printf '%s' "$APIMON_ALLOWED_EMAILS" | npx wrangler secret put APIMON_ALLOWED_EMAILS --config wrangler.toml
 printf '%s' "$APIMON_ALLOWED_ORIGIN" | npx wrangler secret put APIMON_ALLOWED_ORIGIN --config wrangler.toml
 npm run deploy
 
@@ -69,10 +65,10 @@ Never put `APIMON_API_TOKEN` in a `VITE_*` variable, frontend environment file, 
 4. Open the Pages custom domain and confirm the dashboard loads.
 5. Inspect the built JavaScript assets and confirm neither `APIMON_API_TOKEN` nor any other server secret is present.
 6. Confirm the dashboard calls the configured HTTPS Worker API origin.
-7. Send an unauthenticated request to `/api/monitors`; it must return 401 or be blocked by Access before reaching the Worker.
-8. Sign in through Cloudflare Access using an allowlisted identity; monitor API access must succeed.
-9. Test an unlisted identity; it must be denied.
-10. Verify that the exact dashboard origin receives the configured CORS response, an untrusted Origin receives 403, and preflight returns an empty 204 without an Access login redirect.
+7. Send a request to `/api/monitors` without an Authorization header; it must return HTTP 401 from the Worker.
+8. Enter the exact `APIMON_API_TOKEN` value in the dashboard connection screen; monitor API access must succeed.
+9. Test an incorrect token; it must return HTTP 401. Confirm the correct token is not present in built JavaScript assets or browser storage.
+10. Verify that the exact dashboard origin receives the configured CORS response, an untrusted Origin receives 403, and preflight returns an empty 204.
 11. Create the RetailOS monitor using the Phase 1 health URL: `https://retailos-server.onrender.com/health`. Confirm interval is 10 minutes, timeout is 10 seconds, and expected status is HTTP 200.
 12. Confirm the monitor is stored in production D1 and survives a dashboard reload.
 13. Confirm Worker Cron Events show invocations and structured Worker logs show scheduler execution and persistence outcomes.
@@ -86,7 +82,7 @@ The Worker rejects non-HTTP(S) schemes, URL credentials, IP-literal hosts, local
 
 The Worker revalidates the stored monitor immediately before each outbound request. Fetch uses `redirect: "manual"`; redirect responses are recorded as failures and are never followed. Response bodies are cancelled without being read. Logs do not include the full target URL, response body, or secret values.
 
-**Important limitation:** a hostname allowlist and application-level URL validation do not prove that the hostname resolves to public IP addresses at connection time. They do not completely prevent DNS rebinding or DNS compromise. Cloudflare Workers' standard outbound `fetch()` path does not provide this application with a verified public-IP pin that can be bound to the subsequent connection. A reviewed egress proxy/network control that resolves and pins only globally routable addresses is still required before APIMON can claim complete DNS-rebinding-resistant SSRF protection or accept arbitrary/untrusted monitor registrations. Until that control is deployed and tested, keep Cloudflare Access restricted to trusted operators and keep the explicit hostname allowlist narrow. This remains a production security release gate.
+**Important limitation:** a hostname allowlist and application-level URL validation do not prove that the hostname resolves to public IP addresses at connection time. They do not completely prevent DNS rebinding or DNS compromise. Cloudflare Workers' standard outbound `fetch()` path does not provide this application with a verified public-IP pin that can be bound to the subsequent connection. A reviewed egress proxy/network control that resolves and pins only globally routable addresses is still required before APIMON can claim complete DNS-rebinding-resistant SSRF protection or accept arbitrary/untrusted monitor registrations. Until that control is deployed and tested, keep the API bearer token restricted to trusted operators and keep the explicit hostname allowlist narrow. This remains a production security release gate.
 
 ## Rollback
 

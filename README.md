@@ -38,7 +38,7 @@ These are initial architecture decisions and may be revised through documented t
 
 ## Getting started
 
-The APIMON dashboard is available in `frontend/`. It connects to the Cloudflare Worker API for monitor configuration and persisted check history. Production browser access is protected with Cloudflare Access; the local Vite proxy keeps the Worker service token server-side.
+The APIMON dashboard is available in `frontend/`. It connects to the Cloudflare Worker API for monitor configuration and persisted check history. Operators authenticate with the Worker bearer token in the dashboard connection screen; the token is kept in memory and sent in the Authorization header.
 
 Before starting, read [AGENTS.md](AGENTS.md), [worker/README.md](worker/README.md), and [frontend/README.md](frontend/README.md).
 
@@ -51,7 +51,7 @@ npm run db:migrate:local
 npm run dev
 ~~~
 
-In a second terminal, copy frontend/.env.example to frontend/.env.local, set APIMON_API_TOKEN to the same local token used by the Worker, then run:
+In a second terminal, copy frontend/.env.example to frontend/.env.local, set APIMON_API_ORIGIN to http://127.0.0.1:8787, then run:
 
 ~~~bash
 cd frontend
@@ -67,7 +67,7 @@ Read [docs/PRD.md](docs/PRD.md) for product scope, [docs/ARCHITECTURE.md](docs/A
 - Keep the scheduler independent from the monitored applications.
 - Store timestamps in UTC.
 - Validate and secure all user-supplied target URLs against SSRF.
-- Never expose monitor credentials or secrets in frontend code or logs.
+- Never bundle secrets into frontend code or logs. The dashboard operator must enter the bearer token; it is not persisted by the browser.
 - Add tests and update documentation with every feature.
 - Do not claim uptime guarantees based only on periodic HTTP checks.
 

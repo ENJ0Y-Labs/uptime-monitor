@@ -1,7 +1,12 @@
 const isDevelopment = Boolean(import.meta.env?.DEV);
 const configuredBaseUrl = isDevelopment ? '' : (import.meta.env?.VITE_APIMON_API_BASE_URL || '');
+let activeApiToken = '';
 
-export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = false) {
+export function setApiToken(token) {
+  activeApiToken = String(token || '').trim();
+}
+
+export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = false, tokenProvider = () => activeApiToken) {
   const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
 
   async function request(path, options = {}) {
@@ -9,14 +14,18 @@ export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = f
       throw new Error('APIMON API is not configured. Set VITE_APIMON_API_BASE_URL and rebuild the frontend.');
     }
 
+    const token = String(tokenProvider() || '').trim();
+    if (!token) throw new Error('Enter your APIMON API token to connect.');
+
     let response;
     try {
       response = await fetchImpl(normalizedBaseUrl + path, {
         ...options,
-        credentials: 'include',
+        credentials: 'omit',
         headers: {
           ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          ...options.headers
+          ...options.headers,
+          Authorization: 'Bearer ' + token
         }
       });
     } catch {
@@ -34,13 +43,10 @@ export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = f
 
     if (!response.ok) {
       if (response.status === 401) {
-        const message = allowRelativeUrl
-          ? 'APIMON rejected the local proxy credentials (401). Confirm APIMON_API_TOKEN in frontend/.env.local matches worker/.dev.vars. Check for an inherited shell variable overriding the local file, then restart Vite.'
-          : 'Cloudflare Access did not authenticate this request (401). Sign in to the protected Worker API and confirm your email is included in APIMON_ALLOWED_EMAILS.';
-        throw new Error(message);
+        throw new Error('APIMON rejected this API token (401). Check that it matches the APIMON_API_TOKEN secret configured on the Worker.');
       }
       if (response.status === 403) {
-        throw new Error('APIMON blocked this request (403). Check the Cloudflare Access policy and APIMON_ALLOWED_ORIGIN configuration.');
+        throw new Error('APIMON blocked this request (403). Check APIMON_ALLOWED_ORIGIN and the Worker deployment configuration.');
       }
       throw new Error(payload?.error || 'APIMON API request failed (' + response.status + ').');
     }

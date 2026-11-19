@@ -38,16 +38,16 @@ The Phase 5 shared-workspace monitor API and scheduled Worker use Cloudflare D1 
 
 The scheduler must not run as a background thread, Flask request hook, or process hosted inside the application being monitored. A sleeping or unavailable monitored service must not stop the scheduler from checking it.
 
-The Worker now reads and writes durable monitor and check-result records in D1. Its API supports Cloudflare Access-authenticated dashboard requests and a shared service token for trusted server-to-server clients. The React frontend now reads and writes monitor configuration and check history through the Worker API. In production, Cloudflare Access authenticates the operator; the Worker reads the signed-in identity from ctx.access and checks it against APIMON_ALLOWED_EMAILS. The browser never receives APIMON_API_TOKEN. A local Vite development proxy adds the local service token on the server side. Monitor settings and check results remain in D1. Per-user ownership and PostgreSQL synchronization remain later work.
+The Worker now reads and writes durable monitor and check-result records in D1. Its API authenticates protected routes with `Authorization: Bearer <APIMON_API_TOKEN>`. The React frontend asks the operator to enter this token, sends it in the Authorization header, and keeps it in memory only. The Worker no longer depends on Cloudflare Access identity context or `APIMON_ALLOWED_EMAILS`. The Worker API hostname must not be protected by a Cloudflare Access application because Access can intercept requests before Worker token validation. Monitor settings and check results remain in D1. Per-user ownership and PostgreSQL synchronization remain later work.
 
 ## Dashboard-to-Worker integration
 
 - The frontend base URL is configured with VITE_APIMON_API_BASE_URL.
-- Production browser requests use credentialed CORS and Cloudflare Access. The Worker accepts only the configured APIMON_ALLOWED_ORIGIN.
-- The Worker supports both allowlisted Cloudflare Access identities and a bearer service token for trusted server-side clients.
+- Production browser requests send the bearer token in Authorization and do not use cookies. The Worker accepts only the configured APIMON_ALLOWED_ORIGIN.
+- The Worker validates the bearer token against its APIMON_API_TOKEN secret; no Cloudflare Access identity fallback is used.
 - The frontend refreshes monitor data and recent history on load, on demand, and every 60 seconds. This refresh is read-only and does not invoke a scheduled check.
 - The dashboard's response-time chart is derived only from persisted check-result responseTimeMs values.
-- The current Access allowlist grants access to one shared workspace; it does not implement account registration or per-user monitor ownership.
+- The shared bearer token grants access to one workspace; it does not implement account registration or per-user monitor ownership.
 
 ## 4. Initial data concepts
 
@@ -98,7 +98,7 @@ Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger st
 - Database: Cloudflare D1 bound as `APIMON_DB`.
 - Worker Cron Trigger: every minute; monitor-specific intervals are enforced from D1.
 
-The deployment workflow runs tests, applies remote D1 migrations, writes Worker secrets, deploys the Worker, builds the frontend with its public API origin, and publishes Pages assets. Cloudflare Access policies, DNS/custom domains, and the Pages project remain one-time account configuration. See `docs/DEPLOYMENT.md`.
+The deployment workflow runs tests, applies remote D1 migrations, writes Worker secrets, deploys the Worker, builds the frontend with its public API origin, and publishes Pages assets. DNS/custom domains and the Pages project remain one-time account configuration. The Worker API hostname must not be protected by Cloudflare Access; see `docs/DEPLOYMENT.md`.
 
 ## 8. Phase 3 implementation boundary
 
