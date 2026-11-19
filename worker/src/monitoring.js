@@ -134,7 +134,7 @@ function isBlockedTld(hostname) {
  * @param {string|string[]} value - Comma-separated or array of hostnames
  * @returns {Set} Set of allowed hostnames (lowercase, trimmed, without trailing dot)
  */
-function parseAllowedHostsSet(value) {
+export function parseAllowedHostsSet(value) {
   const values = Array.isArray(value) ? value : String(value || "").split(",");
   return new Set(
     values
@@ -241,7 +241,7 @@ export function validateMonitor(monitor, options = {}) {
   if (options.requireAllowedHost && allowedHosts.size === 0) {
     throw new Error("Target hostname allowlist is not configured.");
   }
-  if (allowedHosts.size > 0 && !allowedHosts.includes(hostname)) {
+  if (allowedHosts.size > 0 && !allowedHosts.has(hostname)) {
     throw new Error("Target hostname is not approved for monitoring.");
   }
 
@@ -307,6 +307,27 @@ export async function checkMonitor(monitor, options = {}) {
     };
   }
 
+  // A supplied IP can be screened, but Cloudflare Workers does not expose or pin
+  // the IP used by fetch(). This is a preflight check, not complete DNS-rebinding protection.
+  const destination = validateDestinationIp(target.hostname, options.resolvedIp, target.allowedHosts);
+  const dnsRebindingWarning = {
+    level: destination.safe ? (options.resolvedIp ? "info" : "warning") : "error",
+    message: destination.message || "The supplied destination IP passed the private/reserved address check; the Worker fetch connection is not pinned to this IP."
+  };
+  if (!destination.safe) {
+    return {
+      monitorId: target.id,
+      monitorName: target.name,
+      status: "DOWN",
+      httpStatusCode: null,
+      responseTimeMs: null,
+      checkedAt,
+      errorCategory: "target_rejected",
+      errorMessage: "The configured destination failed APIMON safety validation.",
+      dnsRebindingWarning
+    };
+  }
+
   const startedAt = monotonicNow();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("APIMON request timeout"), target.timeoutSeconds * 1000);
@@ -330,7 +351,8 @@ export async function checkMonitor(monitor, options = {}) {
       errorCategory: success ? null : (response.status >= 300 && response.status < 400 ? "redirect_blocked" : "unexpected_http_status"),
       errorMessage: success ? null : (response.status >= 300 && response.status < 400
         ? "Redirect responses are not followed by APIMON."
-        : `Expected HTTP ${target.expectedStatus} but received HTTP ${response.status}.`)
+        : `Expected HTTP ${target.expectedStatus} but received HTTP ${response.status}.`),
+      dnsRebindingWarning
     };
   } catch (error) {
     const responseTimeMs = Math.max(0, Math.round(monotonicNow() - startedAt));
@@ -343,13 +365,13 @@ export async function checkMonitor(monitor, options = {}) {
       responseTimeMs,
       checkedAt,
       errorCategory: timedOut ? "timeout" : "connection_error",
-      errorMessage: timedOut ? `Request timed out after ${target.timeoutSeconds} seconds.` : "Could not connect to the target service."
+      errorMessage: timedOut ? `Request timed out after ${target.timeoutSeconds} seconds.` : "Could not connect to the target service.",
+      dnsRebindingWarning
     };
   } finally {
     clearTimeout(timeout);
   }
 }
-
 export async function runMonitorBatch(monitors, options = {}) {
   const results = [];
   for (const monitor of monitors) {
