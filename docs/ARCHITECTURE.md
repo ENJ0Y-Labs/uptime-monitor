@@ -47,7 +47,7 @@ The Worker now reads and writes durable monitor and check-result records in D1. 
 - The Worker validates the bearer token against its APIMON_API_TOKEN secret; no Cloudflare Access identity fallback is used.
 - The frontend refreshes monitor data and recent history on load, on demand, and every 60 seconds. This refresh is read-only and does not invoke a scheduled check.
 - The dashboard's response-time chart is derived only from persisted check-result responseTimeMs values.
-- The current Access allowlist grants access to one shared workspace; it does not implement account registration or per-user monitor ownership.
+- The shared bearer token grants access to one workspace; it does not implement account registration or per-user monitor ownership.
 
 ## 4. Initial data concepts
 
