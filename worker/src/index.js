@@ -17,7 +17,7 @@ const apiError = (message, status) => json({ error: message }, status);
 function serviceTokenAuthorized(request, env) {
   const expected = env.APIMON_API_TOKEN;
   const authorization = request.headers.get("Authorization") || "";
-  const match = authorization.match(/^Bearer\\s+(.+)$/i);
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
   const supplied = match?.[1] || "";
   if (typeof expected !== "string" || expected.length < 32 || supplied.length !== expected.length) return false;
 
