@@ -30,16 +30,11 @@ Create and update fields are name, url, intervalMinutes, timeoutSeconds, and exp
 
 ## Authentication and CORS
 
-The API supports two server-verified authentication paths:
+Protected API routes use `Authorization: Bearer <APIMON_API_TOKEN>`. The Worker validates the bearer token against the `APIMON_API_TOKEN` secret. Cloudflare Access identity context and `APIMON_ALLOWED_EMAILS` are not used.
 
-1. Cloudflare Access for the browser dashboard. Cloudflare authenticates the operator, and the Worker reads the authenticated identity through `ctx.access.getIdentity()`. The Worker checks the identity email against `APIMON_ALLOWED_EMAILS`.
-2. `APIMON_API_TOKEN` for trusted server-to-server clients. This credential must remain on a trusted server and must never be embedded in browser code.
+The dashboard asks the operator to enter the same token configured on the Worker. It sends the token in the Authorization header and omits browser cookies. The token stays in JavaScript memory only and is cleared on refresh or sign out; it is not bundled, stored in browser storage, or configured as a `VITE_` variable. A bearer token can be copied by anyone who can inspect an authenticated browser session, so distribute it only to trusted operators and rotate it if exposed.
 
-The dashboard does not send `APIMON_API_TOKEN`. Do not add it to `VITE_` variables or local storage.
-
-For production, create a Cloudflare Access application protecting the Worker API hostname and `/api/*` paths. Restrict its policy to the intended operators. The Worker rejects any Origin other than the exact `APIMON_ALLOWED_ORIGIN`. CORS preflight requests receive an empty 204 only for that configured origin. Configure Access so OPTIONS requests reach the Worker without an interactive login redirect.
-
-The service token remains a separate server-to-server authentication path. Do not expose it to the browser or configure an unprotected alternate browser route.
+Do not protect the Worker API hostname with a Cloudflare Access application or policy. An edge Access policy can reject the request before it reaches the Worker, preventing the Worker from validating the bearer token. The Worker rejects any Origin other than the exact `APIMON_ALLOWED_ORIGIN`. CORS preflight requests receive an empty 204 only for that configured origin. CORS is not authentication; the bearer token is required for every protected API route.
 
 ## Target host allowlist and SSRF boundaries
 
@@ -47,7 +42,7 @@ Production monitor creation and updates require an explicit `APIMON_ALLOWED_TARG
 
 Every stored monitor is revalidated immediately before a scheduled fetch. Redirects are not followed; 3xx responses are recorded as failed checks. The response body is cancelled and not read.
 
-The allowlist is defense in depth, not a complete DNS-rebinding defense. A hostname can resolve to a private address after application-level validation, and the standard Worker fetch API does not expose a verified public-IP pin for the connection. A reviewed egress proxy or network control that resolves and pins globally routable addresses remains a security release gate. Until that exists, keep Access restricted to trusted operators and do not allow untrusted public users to register arbitrary targets.
+The allowlist is defense in depth, not a complete DNS-rebinding defense. A hostname can resolve to a private address after application-level validation, and the standard Worker fetch API does not expose a verified public-IP pin for the connection. A reviewed egress proxy or network control that resolves and pins globally routable addresses remains a security release gate. Until that exists, keep the bearer token restricted to trusted operators and do not allow untrusted public users to register arbitrary targets.
 
 ## D1 setup
 
@@ -79,21 +74,21 @@ npm test
 npm run dev
 ~~~
 
-The Worker package scripts explicitly select `worker/wrangler.toml`. This is important because the repository root also contains a separate `wrangler.jsonc` for frontend assets. The local allowed origin defaults to `http://127.0.0.1:5173`; change it only to the exact origin used for direct browser-to-Worker requests. Local dashboard requests use the same-origin Vite proxy instead, which removes the browser Origin header and adds the service token server-side.
+The Worker package scripts explicitly select `worker/wrangler.toml`. This is important because the repository root also contains a separate `wrangler.jsonc` for frontend assets. The local allowed origin defaults to `http://127.0.0.1:5173`; change it only to the exact origin used by the browser dashboard. Local dashboard requests use the same-origin Vite proxy, which removes the browser Origin header and forwards the Authorization header entered in the dashboard.
 
-For the frontend, copy `frontend/.env.example` to `frontend/.env.local`. Put the same local token in `APIMON_API_TOKEN` and set `APIMON_API_ORIGIN` to `http://127.0.0.1:8787`. The token is injected by the Vite server proxy and never enters browser code.
+For the frontend, copy `frontend/.env.example` to `frontend/.env.local` and set only `APIMON_API_ORIGIN` to `http://127.0.0.1:8787`. Open the dashboard and enter the same local token configured in `worker/.dev.vars`. Do not put the token in the frontend environment file.
 
 ## Production deployment
 
 The GitHub Actions workflow deploys on pushes to `main` after Worker tests, frontend tests, and the frontend production build pass. Configure the required repository secrets and variables in `docs/DEPLOYMENT.md`. The workflow applies remote D1 migrations, writes the Worker secrets, deploys the Worker, builds the dashboard with the public API origin, and publishes Pages assets.
 
-Cloudflare Access policies, DNS/custom domains, and the Pages project must be configured separately. After deployment:
+DNS/custom domains and the Pages project must be configured separately. Ensure no Cloudflare Access application or policy protects the Worker API hostname. After deployment:
 
 1. Confirm `GET /health` returns HTTP 200.
 2. Confirm `GET /ready` returns HTTP 200 and `status: "ready"`.
 3. Verify the remote D1 migrations are applied.
-4. Sign in through Cloudflare Access and confirm an allowlisted identity can use monitor endpoints.
-5. Confirm unauthenticated and unlisted identities cannot access protected management operations.
+4. Enter the configured APIMON API token in the dashboard and confirm monitor endpoints work.
+5. Send a request without a token and with an incorrect token; both must return HTTP 401.
 6. Confirm only the configured dashboard Origin receives CORS permission.
 7. Create the RetailOS monitor at `https://retailos-server.onrender.com/health` with a 10-minute interval, 10-second timeout, and expected HTTP 200.
 8. Verify the monitor and check history persist in D1.
