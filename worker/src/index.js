@@ -16,35 +16,25 @@ const apiError = (message, status) => json({ error: message }, status);
 
 function serviceTokenAuthorized(request, env) {
   const expected = env.APIMON_API_TOKEN;
-  const supplied = request.headers.get("Authorization") || "";
-  return typeof expected === "string" && expected.length >= 32 &&
-    supplied === "Bearer " + expected;
-}
+  const authorization = request.headers.get("Authorization") || "";
+  const match = authorization.match(/^Bearer\\s+(.+)$/i);
+  const supplied = match?.[1] || "";
+  if (typeof expected !== "string" || expected.length < 32 || supplied.length !== expected.length) return false;
 
-async function accessUserAuthorized(env, ctx) {
-  const allowedEmails = String(env.APIMON_ALLOWED_EMAILS || "")
-    .split(",")
-    .map(email => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (!allowedEmails.length || typeof ctx?.access?.getIdentity !== "function") return false;
-
-  try {
-    const identity = await ctx.access.getIdentity();
-    const email = String(identity?.email || "").trim().toLowerCase();
-    return Boolean(email && allowedEmails.includes(email));
-  } catch {
-    return false;
+  let difference = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    difference |= expected.charCodeAt(index) ^ supplied.charCodeAt(index);
   }
+  return difference === 0;
 }
 
-async function authorized(request, env, ctx) {
-  return serviceTokenAuthorized(request, env) || await accessUserAuthorized(env, ctx);
+async function authorized(request, env) {
+  return serviceTokenAuthorized(request, env);
 }
 
 function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
@@ -76,7 +66,7 @@ function parseMonitorInput(body, id) {
   };
 }
 
-async function handleRequest(request, env, ctx) {
+async function handleRequest(request, env) {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/health") {
     return json({ service: "APIMON Worker", status: "ok" });
@@ -92,7 +82,7 @@ async function handleRequest(request, env, ctx) {
   }
 
   if (!url.pathname.startsWith("/api/")) return apiError("Not found", 404);
-  if (!await authorized(request, env, ctx)) return apiError("Unauthorized", 401);
+  if (!await authorized(request, env)) return apiError("Unauthorized", 401);
   if (!env.APIMON_DB) return apiError("Monitoring storage is unavailable.", 503);
 
   try {
@@ -154,7 +144,7 @@ async function handleRequest(request, env, ctx) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const origin = request.headers.get("Origin");
     if (origin && origin !== env.APIMON_ALLOWED_ORIGIN) return apiError("Origin not allowed.", 403);
 
@@ -163,7 +153,7 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    const response = await handleRequest(request, env, ctx);
+    const response = await handleRequest(request, env);
     return withCors(response, origin, env);
   },
 
