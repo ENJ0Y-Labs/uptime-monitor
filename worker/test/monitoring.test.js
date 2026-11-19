@@ -328,7 +328,8 @@ test("validateMonitor accepts approved hostnames using a Set allowlist", () => {
     requireAllowedHost: true,
     allowedHosts: new Set(["retailos-server.onrender.com"])
   });
-  assert.equal(result.hostname, undefined);
+  assert.equal(result.hostname, "retailos-server.onrender.com");
+  assert.equal(result.allowedHosts.has("retailos-server.onrender.com"), true);
 });
 
 test("validateMonitor rejects hostnames outside a Set allowlist", () => {
