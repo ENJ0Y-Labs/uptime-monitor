@@ -46,7 +46,6 @@ cd worker
 npm ci
 npm run db:migrate:remote
 printf '%s' "$APIMON_API_TOKEN" | npx wrangler secret put APIMON_API_TOKEN --config wrangler.toml
-printf '%s' "$APIMON_ALLOWED_EMAILS" | npx wrangler secret put APIMON_ALLOWED_EMAILS --config wrangler.toml
 printf '%s' "$APIMON_ALLOWED_ORIGIN" | npx wrangler secret put APIMON_ALLOWED_ORIGIN --config wrangler.toml
 npm run deploy
 
@@ -83,7 +82,7 @@ The Worker rejects non-HTTP(S) schemes, URL credentials, IP-literal hosts, local
 
 The Worker revalidates the stored monitor immediately before each outbound request. Fetch uses `redirect: "manual"`; redirect responses are recorded as failures and are never followed. Response bodies are cancelled without being read. Logs do not include the full target URL, response body, or secret values.
 
-**Important limitation:** a hostname allowlist and application-level URL validation do not prove that the hostname resolves to public IP addresses at connection time. They do not completely prevent DNS rebinding or DNS compromise. Cloudflare Workers' standard outbound `fetch()` path does not provide this application with a verified public-IP pin that can be bound to the subsequent connection. A reviewed egress proxy/network control that resolves and pins only globally routable addresses is still required before APIMON can claim complete DNS-rebinding-resistant SSRF protection or accept arbitrary/untrusted monitor registrations. Until that control is deployed and tested, keep Cloudflare Access restricted to trusted operators and keep the explicit hostname allowlist narrow. This remains a production security release gate.
+**Important limitation:** a hostname allowlist and application-level URL validation do not prove that the hostname resolves to public IP addresses at connection time. They do not completely prevent DNS rebinding or DNS compromise. Cloudflare Workers' standard outbound `fetch()` path does not provide this application with a verified public-IP pin that can be bound to the subsequent connection. A reviewed egress proxy/network control that resolves and pins only globally routable addresses is still required before APIMON can claim complete DNS-rebinding-resistant SSRF protection or accept arbitrary/untrusted monitor registrations. Until that control is deployed and tested, keep the API bearer token restricted to trusted operators and keep the explicit hostname allowlist narrow. This remains a production security release gate.
 
 ## Rollback
 
