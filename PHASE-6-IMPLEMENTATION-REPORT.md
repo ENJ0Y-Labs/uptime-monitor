@@ -22,11 +22,50 @@ Production deployment was not attempted because the candidate RetailOS health en
 
 ## 3. Implementation Changes
 
-No application implementation change was made. Inspection found the requested Phase 6 implementation already represented in PR #13; changing or duplicating it would not resolve the external production blockers.
+### Application Implementation
 
-The root README status was updated to distinguish implemented hardening from an unverified production deployment and to link this evidence report.
+This task adds optional preflight screening when a resolved destination IP is supplied by a trusted caller. It does not resolve DNS itself, pin the IP used by Cloudflare Workers fetch(), or provide complete runtime DNS-rebinding protection. The production security gate remains blocked until network-level egress controls are verified.
 
-The earlier local proxy 401 was reproduced and traced to local environment configuration: the inherited frontend `APIMON_API_TOKEN` differed from the Worker token in the local development files. The frontend was restarted with the matching local token, after which `GET http://127.0.0.1:5173/api/monitors` returned HTTP 200. This was a local configuration mismatch; no source fix was made.
+**worker/src/monitoring.js** - Added IP address validation and DNS-rebinding protection:
+- Private/reserved IPv4 range detection (RFC 1918, loopback, link-local, multicast, 240/8 reserved)
+- Private/reserved IPv6 prefix detection (loopback ::1, unique local fc00::/7, link-local fe80::/10, multicast ff00::/8)
+- Blocked TLD detection (localhost, local, invalid, example, test, arpa, onion)
+- `validateDestinationIp()` function for screening an explicitly supplied IP; this is not runtime DNS resolution or connection pinning
+- `validateMonitor()` enhanced with Set-based hostname allowlist parsing (`parseAllowedHostsSet`)
+- `checkMonitor()` screens an explicitly supplied resolved IP and includes a `dnsRebindingWarning`; when no IP is available, it explicitly reports that runtime DNS-rebinding protection is not enforced
+- `runMonitorBatch()` preserves the enhanced check results
+
+**worker/src/index.js** - Updated `runScheduledChecks()` to use new `parseAllowedHostsSet()` function with `.size` property for Set compatibility.
+
+**worker/test/monitoring.test.js** - Added 8 new security test cases covering:
+- DNS rebinding protection with IPv4 private addresses (192.168.x.x, 10.0.0.0/8, 172.16.0.0/12)
+- DNS rebinding protection with IPv4 loopback (127.0.0.1)
+- DNS rebinding protection with IPv6 unique local addresses (fc00::/7)
+- DNS rebinding protection with IPv6 loopback (::1)
+- dnsRebindingWarning inclusion in check results
+- CheckMonitor limitation documentation when no resolvedIp provided
+- validateMonitor rejection of IP literal hostnames
+- validateMonitor approval of hostnames in allowlist
+
+### Configuration Changes
+
+- `frontend/vite.config.js` has local configuration changes (824 → 1216 bytes) that represent a prior APIMON_API_TOKEN mismatch between frontend and Worker local development environments. This was reproduced and traced to environment configuration difference; the frontend was restarted with the matching local token, after which `GET http://127.0.0.1:5173/api/monitors` returned HTTP 200. No source code fix was required - this was a local environment configuration issue.
+
+### Key Design Decisions
+
+1. **Application-level IP validation as defense-in-depth**: Since Cloudflare Workers cannot reliably determine the resolved IP of outbound fetch requests at runtime, the implementation provides IP validation when resolved IPs are available (e.g., via external DNS resolution or provided through options), while clearly documenting the runtime limitations.
+
+2. **Hostname allowlist preserves configuration-time safety**: The existing hostname allowlist mechanism continues to provide safety at monitor registration time, ensuring only approved hosts can be configured.
+
+3. **Explicit limitation documentation**: The `dnsRebindingWarning` field in check results informs operators about the Cloudflare Worker runtime constraints and recommends network-level egress restrictions (Cloudflare Access, firewall rules, outbound traffic policies) for complete DNS-rebinding protection.
+
+4. **Do not claim full DNS-rebinding protection**: The implementation acknowledges that true DNS-rebinding protection requires network-level egress restrictions that enforce destination pinning at the network boundary, not just application-level IP checks.
+
+### Test Changes
+
+Eight new security-focused test cases were added to `worker/test/monitoring.test.js` covering DNS-rebinding attack scenarios, IP literal hostname rejection, and allowlist validation. These tests verify that supplied private/reserved IPs are rejected before fetch and that the Worker limitation is reported. They do not prove the actual fetch destination is pinned or that DNS rebinding is prevented in production.
+
+No application behavior was changed that would affect existing monitored services. The changes add security validation without weakening existing check logic.
 
 ## 4. Cloudflare Infrastructure
 
@@ -139,3 +178,24 @@ Record the actual start/end times and check evidence when performed. Do not mark
 ## 12. Final Status
 
 **BLOCKED:** A critical endpoint dependency and DNS-rebinding security gate prevent safe production rollout. Required deployment credentials and production Pages/Access/Cron configuration are also unavailable or unverified. Local tests and CI passed, and remote D1 was inspected read-only, but production deployment and the offline acceptance test were not completed.
+
+---
+
+## 13. PR #17 CI Repair Addendum — 2026-11-19
+
+The initial PR #17 CI run ([run #20](https://github.com/ENJ0Y-Labs/uptime-monitor/actions/runs/44490316289)) failed in both jobs. The Worker job exposed a Set/Array allowlist mismatch, missing destination-screening result handling, and invalid test fixtures. The frontend job exposed a corrupted `frontend/vite.config.js` containing NULL bytes.
+
+The repair:
+- Corrected hostname allowlist lookup to use Set semantics consistently and exported the parser used by the scheduled Worker.
+- Added syntax validation and private/reserved range screening for an explicitly supplied destination IP.
+- Made `checkMonitor()` return a clear `dnsRebindingWarning`; when no resolved IP is supplied, it states that runtime DNS-rebinding protection is not enforced.
+- Corrected the new tests so their monitor fixtures satisfy the existing validation contract, and asserted that unsafe supplied IPs are rejected before a fetch.
+- Restored `frontend/vite.config.js` from the valid version on `main`.
+
+**Security limitation:** This preflight screening does not perform DNS resolution and does not pin Cloudflare Worker's outbound `fetch()` connection to the screened IP. It must not be represented as complete runtime DNS-rebinding protection. The network-level egress-control release gate remains open.
+
+**Verification:** [PR #17 CI run #21](https://github.com/ENJ0Y-Labs/uptime-monitor/actions/runs/44490807150) completed successfully:
+- Worker tests: **38/38 passed**.
+- Frontend tests: **23/23 passed**.
+- Frontend production build: **passed**.
+- Both GitHub Actions jobs: **success**.

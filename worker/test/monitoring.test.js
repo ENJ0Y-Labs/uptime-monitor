@@ -249,3 +249,92 @@ test("empty or missing configured secret fails securely", async () => {
     assert.deepEqual(await response.json(), { error: "Unauthorized" });
   }
 });
+test("rejects private IPv4 destinations supplied for preflight validation", async () => {
+  let fetchCalled = false;
+  const result = await checkMonitor(monitor, {
+    resolvedIp: "192.168.1.1",
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com",
+    fetchImpl: async () => { fetchCalled = true; return new Response("ok", { status: 200 }); }
+  });
+  assert.equal(fetchCalled, false);
+  assert.equal(result.status, "DOWN");
+  assert.equal(result.errorCategory, "target_rejected");
+  assert.match(result.dnsRebindingWarning.message, /private\/reserved/);
+});
+
+test("rejects IPv4 loopback destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
+    resolvedIp: "127.0.0.1",
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com"
+  });
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /Loopback/);
+});
+
+test("rejects IPv6 unique-local destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
+    resolvedIp: "fc00::1",
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com"
+  });
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /unique local/);
+});
+
+test("rejects IPv6 loopback destinations supplied for preflight validation", async () => {
+  const result = await checkMonitor(monitor, {
+    resolvedIp: "::1",
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com"
+  });
+  assert.equal(result.status, "DOWN");
+  assert.match(result.dnsRebindingWarning.message, /loopback/);
+});
+
+test("includes an explicit DNS-rebinding limitation when no resolved IP is available", async () => {
+  const result = await checkMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: "retailos-server.onrender.com",
+    fetchImpl: async () => new Response("ok", { status: 200 })
+  });
+  assert.equal(result.status, "UP");
+  assert.equal(result.dnsRebindingWarning.level, "warning");
+  assert.match(result.dnsRebindingWarning.message, /not enforced at runtime/);
+  assert.match(result.dnsRebindingWarning.message, /Worker environment/);
+});
+
+test("validateMonitor rejects IP literal hostnames", () => {
+  for (const url of [
+    "http://192.168.1.1/health",
+    "http://127.0.0.1/health",
+    "http://[::1]/health"
+  ]) {
+    assert.throws(() => validateMonitor({
+      id: "test",
+      name: "Test",
+      url,
+      enabled: true,
+      intervalMinutes: 10,
+      timeoutSeconds: 10,
+      expectedStatus: 200
+    }), /IP literals/);
+  }
+});
+
+test("validateMonitor accepts approved hostnames using a Set allowlist", () => {
+  const result = validateMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: new Set(["retailos-server.onrender.com"])
+  });
+  assert.equal(result.hostname, "retailos-server.onrender.com");
+  assert.equal(result.allowedHosts.has("retailos-server.onrender.com"), true);
+});
+
+test("validateMonitor rejects hostnames outside a Set allowlist", () => {
+  assert.throws(() => validateMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: new Set(["other.example.com"])
+  }), /not approved/);
+});

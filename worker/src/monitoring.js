@@ -3,6 +3,35 @@ const DEFAULT_EXPECTED_STATUS = 200;
 const MAX_TARGETS_PER_RUN = 25;
 const MAX_URL_LENGTH = 2048;
 const SUPPORTED_INTERVALS = new Set([1, 5, 10, 20, 30]);
+// Private/reserved IPv4 ranges (RFC 1918, loopback, link-local, multicast, etc.)
+const PRIVATE_IPV4_RANGES = [
+  { start: "10.0.0.0", end: "10.255.255.255", name: "RFC 1918 Class A" },
+  { start: "172.16.0.0", end: "172.31.255.255", name: "RFC 1918 Class B" },
+  { start: "192.168.0.0", end: "192.168.255.255", name: "RFC 1918 Class C" },
+  { start: "127.0.0.0", end: "127.255.255.255", name: "Loopback" },
+  { start: "169.254.0.0", end: "169.254.255.255", name: "Link-local (APIPA)" },
+  { start: "224.0.0.0", end: "239.255.255.255", name: "Multicast" },
+  { start: "240.0.0.0", end: "255.255.255.255", name: "Reserved" },
+];
+
+// Private/reserved IPv6 prefixes (RFC 4291, unique local, loopback, multicast)
+const PRIVATE_IPV6_PREFIXES = [
+  { prefix: "::1", name: "IPv6 loopback" },
+  { prefix: "fc00::", name: "IPv6 unique local (ULA)" },
+  { prefix: "fe80::", name: "IPv6 link-local" },
+  { prefix: "ff00::", name: "IPv6 multicast" },
+];
+
+// Blocked TLDs that are never legitimate monitoring targets
+const BLOCKED_TLDS = new Set([
+  "localhost",
+  "local",
+  "invalid",
+  "example",
+  "test",
+  "arpa",
+  "onion",
+]);
 
 export function parseAllowedHosts(value) {
   const values = Array.isArray(value) ? value : String(value || "").split(",");
@@ -28,6 +57,164 @@ function isNonPublicHostname(hostname) {
     hostname.endsWith(".onion");
 }
 
+/**
+ * Convert an IPv4 address string to a 32-bit integer for comparison.
+ */
+function isValidIpv4(ip) {
+  const parts = ip.split(".");
+  return parts.length === 4 && parts.every((part) => /^\\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+function ipv4ToInteger(ip) {
+  const parts = ip.split(".").map(Number);
+  return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+}
+
+/**
+ * Check if an IPv4 integer is within a range [startInt, endInt].
+ */
+function ipv4InRange(ipInt, startInt, endInt) {
+  return ipInt >= startInt && ipInt <= endInt;
+}
+
+/**
+ * Check if an IPv4 address is in a private/reserved range.
+ * @param {string} ip - IPv4 address in dotted-decimal notation
+ * @returns {string|null} Description of the private range, or null if public
+ */
+function isPrivateIpv4(ip) {
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) return null;
+  const ipInt = ipv4ToInteger(ip);
+
+  for (const range of PRIVATE_IPV4_RANGES) {
+    const parts = range.start.split(".").map(Number);
+    const startInt = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+    const endParts = range.end.split(".").map(Number);
+    const endInt = (endParts[0] << 24) | (endParts[1] << 16) | (endParts[2] << 8) | endParts[3];
+    if (ipv4InRange(ipInt, startInt, endInt)) {
+      return range.name;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if an IPv6 address is a private/reserved address.
+ * @param {string} ip - IPv6 address
+ * @returns {string|null} Description of the private range, or null if public
+ */
+function isPrivateIpv6(ip) {
+  if (!ip.includes(":")) return null;
+
+  const normalizedIp = ip.toLowerCase();
+  for (const entry of PRIVATE_IPV6_PREFIXES) {
+    const matches = entry.prefix === "::1"
+      ? normalizedIp === "::1"
+      : normalizedIp.startsWith(entry.prefix);
+    if (matches) return entry.name;
+  }
+  // Check for unspecified address ::0
+  if (ip === "::") return "IPv6 unspecified";
+  return null;
+}
+
+/**
+ * Check if a hostname string ends with a blocked/unsafe TLD.
+ * @param {string} hostname - Lowercase hostname
+ * @returns {boolean} true if the hostname uses a blocked TLD
+ */
+function isBlockedTld(hostname) {
+  const parts = hostname.split(".");
+  if (parts.length < 2) return false;
+  const tld = parts[parts.length - 1].toLowerCase();
+  return BLOCKED_TLDS.has(tld);
+}
+
+/**
+ * Parse allowed hosts into a Set for efficient lookup.
+ * @param {string|string[]} value - Comma-separated or array of hostnames
+ * @returns {Set} Set of allowed hostnames (lowercase, trimmed, without trailing dot)
+ */
+export function parseAllowedHostsSet(value) {
+  const values = value instanceof Set ? [...value] : Array.isArray(value) ? value : String(value || "").split(",");
+  return new Set(
+    values
+      .map((host) => String(host).trim().toLowerCase().replace(/\.$/, ""))
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Screen a caller-supplied destination IP against known private/reserved ranges.
+ * This is preflight validation only; it does not resolve DNS or pin fetch connections.
+ * 
+ * NOTE: In Cloudflare Worker runtime, the actual resolved IP of an outbound fetch
+ * cannot be reliably determined due to the architecture. This function is designed
+ * to be called with a known resolved IP (e.g., from external DNS resolution or
+ * provided via options.resolvedIp). For true DNS-rebinding protection, network-level
+ * egress restrictions (Cloudflare Access, firewall rules, outbound traffic policies)
+ * must be employed.
+ * 
+ * @param {string} hostname - The monitor URL hostname (lowercase)
+ * @param {string} resolvedIp - The resolved IP address to validate
+ * @param {Set} allowedHosts - Set of approved hostnames from options
+ * @returns {{safe: boolean, message: string|null}} Validation result
+ */
+function validateDestinationIp(hostname, resolvedIp, allowedHosts) {
+  const result = { safe: true, message: null };
+
+  // 1. Check for blocked TLDs (localhost, local, etc.) - hostname level
+  if (isBlockedTld(hostname)) {
+    result.safe = false;
+    result.message = `Hostname "${hostname}" uses a blocked TLD and cannot be monitored.`;
+    return result;
+  }
+
+  // 2. If no resolved IP provided, document the limitation
+  // (In pure Worker environment, we cannot reliably get the resolved IP)
+  if (!resolvedIp) {
+    // Still validate the hostname against the allowlist for config-time safety
+    if (allowedHosts.size > 0 && !allowedHosts.has(hostname)) {
+      result.safe = false;
+      result.message = `Hostname "${hostname}" is not in the approved allowlist.`;
+    }
+    // Return with info about the limitation
+    const infoMessage =
+      "DNS rebinding protection not enforced at runtime: resolved IP not available in Worker environment. " +
+      "Hostname allowlist provides configuration-time safety. " +
+      "For true DNS-rebinding protection, configure Cloudflare Access/egress policies " +
+      "to restrict outbound connections to approved destinations.";
+    return { safe: true, message: result.message || infoMessage };
+  }
+
+  // 3. Validate the resolved IPv4 address
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(resolvedIp)) {
+    const privateRange = isPrivateIpv4(resolvedIp);
+    if (privateRange) {
+      result.safe = false;
+      result.message = `Resolved IP ${resolvedIp} is in a private/reserved range (${privateRange}). DNS rebinding detected or disallowed target.`;
+    }
+  }
+
+  // 4. Validate the resolved IPv6 address
+  if (resolvedIp.includes(":")) {
+    const privateRange = isPrivateIpv6(resolvedIp);
+    if (privateRange) {
+      result.safe = false;
+      result.message = `Resolved IP ${resolvedIp} is a ${privateRange}. DNS rebinding detected or disallowed target.`;
+    }
+  }
+
+  // 5. Check allowlist if configured
+  if (allowedHosts.size > 0 && !allowedHosts.has(hostname)) {
+    result.safe = false;
+    if (!result.message) {
+      result.message = `Hostname "${hostname}" is not in the approved allowlist.`;
+    }
+  }
+
+  return result;
+}
 export function validateMonitor(monitor, options = {}) {
   if (!monitor || typeof monitor !== "object" || Array.isArray(monitor)) throw new Error("Monitor configuration must be an object.");
   if (typeof monitor.id !== "string" || !monitor.id.trim()) throw new Error("Monitor id is required.");
@@ -51,11 +238,11 @@ export function validateMonitor(monitor, options = {}) {
   if (url.port && url.port !== expectedPort) throw new Error("Only the standard port for the selected HTTP scheme is permitted.");
   if (url.hash) throw new Error("Monitor URLs must not contain fragments.");
 
-  const allowedHosts = parseAllowedHosts(options.allowedHosts);
-  if (options.requireAllowedHost && allowedHosts.length === 0) {
+  const allowedHosts = parseAllowedHostsSet(options.allowedHosts);
+  if (options.requireAllowedHost && allowedHosts.size === 0) {
     throw new Error("Target hostname allowlist is not configured.");
   }
-  if (allowedHosts.length && !allowedHosts.includes(hostname)) {
+  if (allowedHosts.size > 0 && !allowedHosts.has(hostname)) {
     throw new Error("Target hostname is not approved for monitoring.");
   }
 
@@ -79,7 +266,10 @@ export function validateMonitor(monitor, options = {}) {
     enabled: true,
     intervalMinutes,
     timeoutSeconds,
-    expectedStatus
+    expectedStatus,
+    hostname,
+    allowedHosts,
+    validated: true
   };
 }
 
@@ -118,6 +308,27 @@ export async function checkMonitor(monitor, options = {}) {
     };
   }
 
+  // A supplied IP can be screened, but Cloudflare Workers does not expose or pin
+  // the IP used by fetch(). This is a preflight check, not complete DNS-rebinding protection.
+  const destination = validateDestinationIp(target.hostname, options.resolvedIp, target.allowedHosts);
+  const dnsRebindingWarning = {
+    level: destination.safe ? (options.resolvedIp ? "info" : "warning") : "error",
+    message: destination.message || "The supplied destination IP passed the private/reserved address check; the Worker fetch connection is not pinned to this IP."
+  };
+  if (!destination.safe) {
+    return {
+      monitorId: target.id,
+      monitorName: target.name,
+      status: "DOWN",
+      httpStatusCode: null,
+      responseTimeMs: null,
+      checkedAt,
+      errorCategory: "target_rejected",
+      errorMessage: "The configured destination failed APIMON safety validation.",
+      dnsRebindingWarning
+    };
+  }
+
   const startedAt = monotonicNow();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("APIMON request timeout"), target.timeoutSeconds * 1000);
@@ -141,7 +352,8 @@ export async function checkMonitor(monitor, options = {}) {
       errorCategory: success ? null : (response.status >= 300 && response.status < 400 ? "redirect_blocked" : "unexpected_http_status"),
       errorMessage: success ? null : (response.status >= 300 && response.status < 400
         ? "Redirect responses are not followed by APIMON."
-        : `Expected HTTP ${target.expectedStatus} but received HTTP ${response.status}.`)
+        : `Expected HTTP ${target.expectedStatus} but received HTTP ${response.status}.`),
+      dnsRebindingWarning
     };
   } catch (error) {
     const responseTimeMs = Math.max(0, Math.round(monotonicNow() - startedAt));
@@ -154,13 +366,13 @@ export async function checkMonitor(monitor, options = {}) {
       responseTimeMs,
       checkedAt,
       errorCategory: timedOut ? "timeout" : "connection_error",
-      errorMessage: timedOut ? `Request timed out after ${target.timeoutSeconds} seconds.` : "Could not connect to the target service."
+      errorMessage: timedOut ? `Request timed out after ${target.timeoutSeconds} seconds.` : "Could not connect to the target service.",
+      dnsRebindingWarning
     };
   } finally {
     clearTimeout(timeout);
   }
 }
-
 export async function runMonitorBatch(monitors, options = {}) {
   const results = [];
   for (const monitor of monitors) {
