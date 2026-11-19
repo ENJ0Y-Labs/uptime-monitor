@@ -1,5 +1,8 @@
 # APIMON Phase 6 Implementation Report
 
+> **Authentication update (2026-11-19):** This report records the earlier Phase 6 deployment state. PR #18 supersedes its Cloudflare Access browser-authentication plan with bearer-token authentication using `APIMON_API_TOKEN`. The Worker API hostname must not be protected by Cloudflare Access. See `docs/DEPLOYMENT.md` for current deployment instructions.
+
+
 **Generated:** 2026-11-10T19:10:16+01:00  
 **Repository:** `ENJ0Y-Labs/uptime-monitor`  
 **Branch inspected:** `feat/phase-6-production-hardening`  
