@@ -24,15 +24,15 @@ Production deployment was not attempted because the candidate RetailOS health en
 
 ### Application Implementation
 
-This task added DNS-rebinding protection to the Worker monitoring engine, which was identified as an unresolved security blocker in the original Phase 6 implementation. The following changes were made:
+This task adds optional preflight screening when a resolved destination IP is supplied by a trusted caller. It does not resolve DNS itself, pin the IP used by Cloudflare Workers fetch(), or provide complete runtime DNS-rebinding protection. The production security gate remains blocked until network-level egress controls are verified.
 
 **worker/src/monitoring.js** - Added IP address validation and DNS-rebinding protection:
 - Private/reserved IPv4 range detection (RFC 1918, loopback, link-local, multicast, 240/8 reserved)
 - Private/reserved IPv6 prefix detection (loopback ::1, unique local fc00::/7, link-local fe80::/10, multicast ff00::/8)
 - Blocked TLD detection (localhost, local, invalid, example, test, arpa, onion)
-- `validateDestinationIp()` function for best-effort runtime IP validation
+- `validateDestinationIp()` function for screening an explicitly supplied IP; this is not runtime DNS resolution or connection pinning
 - `validateMonitor()` enhanced with Set-based hostname allowlist parsing (`parseAllowedHostsSet`)
-- `checkMonitor()` now includes `dnsRebindingWarning` in results when resolved IP is provided or when no resolved IP is available (with limitation documentation)
+- `checkMonitor()` screens an explicitly supplied resolved IP and includes a `dnsRebindingWarning`; when no IP is available, it explicitly reports that runtime DNS-rebinding protection is not enforced
 - `runMonitorBatch()` preserves the enhanced check results
 
 **worker/src/index.js** - Updated `runScheduledChecks()` to use new `parseAllowedHostsSet()` function with `.size` property for Set compatibility.
@@ -63,7 +63,7 @@ This task added DNS-rebinding protection to the Worker monitoring engine, which 
 
 ### Test Changes
 
-Eight new security-focused test cases were added to `worker/test/monitoring.test.js` covering DNS-rebinding attack scenarios, IP literal hostname rejection, and allowlist validation. These tests verify the implementation correctly identifies and warns about private/resolved IP addresses while preserving legitimate monitoring functionality.
+Eight new security-focused test cases were added to `worker/test/monitoring.test.js` covering DNS-rebinding attack scenarios, IP literal hostname rejection, and allowlist validation. These tests verify that supplied private/reserved IPs are rejected before fetch and that the Worker limitation is reported. They do not prove the actual fetch destination is pinned or that DNS rebinding is prevented in production.
 
 No application behavior was changed that would affect existing monitored services. The changes add security validation without weakening existing check logic.
 
