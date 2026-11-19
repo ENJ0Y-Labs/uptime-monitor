@@ -40,7 +40,7 @@ test('encodes monitor IDs and returns persisted check history', async () => {
     return response({ results: [{ status: 'UP', responseTimeMs: 42 }] });
   }, false, () => token);
   const result = await api.getChecks('id/with spaces', 25);
-  assert.match(requestedUrl, /id%2Fwith%20spaces\\/checks\\?limit=25$/);
+  assert.match(requestedUrl, /id%2Fwith%20spaces\/checks\?limit=25$/);
   assert.equal(result.results[0].responseTimeMs, 42);
 });
 
