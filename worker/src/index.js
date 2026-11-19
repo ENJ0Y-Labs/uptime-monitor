@@ -178,8 +178,8 @@ export async function runScheduledChecks(env, dependencies = {}) {
     return [];
   }
 
-  const allowedHosts = parseAllowedHosts(env.APIMON_ALLOWED_TARGET_HOSTS);
-  if (allowedHosts.length === 0) {
+  const allowedHosts = parseAllowedHostsSet(env.APIMON_ALLOWED_TARGET_HOSTS);
+  if (allowedHosts.size === 0) {
     console.error(JSON.stringify({ event: "apimon.scheduler.target_allowlist_missing", checkedAt: new Date().toISOString() }));
     return [];
   }

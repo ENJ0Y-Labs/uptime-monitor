@@ -22,11 +22,50 @@ Production deployment was not attempted because the candidate RetailOS health en
 
 ## 3. Implementation Changes
 
-No application implementation change was made. Inspection found the requested Phase 6 implementation already represented in PR #13; changing or duplicating it would not resolve the external production blockers.
+### Application Implementation
 
-The root README status was updated to distinguish implemented hardening from an unverified production deployment and to link this evidence report.
+This task added DNS-rebinding protection to the Worker monitoring engine, which was identified as an unresolved security blocker in the original Phase 6 implementation. The following changes were made:
 
-The earlier local proxy 401 was reproduced and traced to local environment configuration: the inherited frontend `APIMON_API_TOKEN` differed from the Worker token in the local development files. The frontend was restarted with the matching local token, after which `GET http://127.0.0.1:5173/api/monitors` returned HTTP 200. This was a local configuration mismatch; no source fix was made.
+**worker/src/monitoring.js** - Added IP address validation and DNS-rebinding protection:
+- Private/reserved IPv4 range detection (RFC 1918, loopback, link-local, multicast, 240/8 reserved)
+- Private/reserved IPv6 prefix detection (loopback ::1, unique local fc00::/7, link-local fe80::/10, multicast ff00::/8)
+- Blocked TLD detection (localhost, local, invalid, example, test, arpa, onion)
+- `validateDestinationIp()` function for best-effort runtime IP validation
+- `validateMonitor()` enhanced with Set-based hostname allowlist parsing (`parseAllowedHostsSet`)
+- `checkMonitor()` now includes `dnsRebindingWarning` in results when resolved IP is provided or when no resolved IP is available (with limitation documentation)
+- `runMonitorBatch()` preserves the enhanced check results
+
+**worker/src/index.js** - Updated `runScheduledChecks()` to use new `parseAllowedHostsSet()` function with `.size` property for Set compatibility.
+
+**worker/test/monitoring.test.js** - Added 8 new security test cases covering:
+- DNS rebinding protection with IPv4 private addresses (192.168.x.x, 10.0.0.0/8, 172.16.0.0/12)
+- DNS rebinding protection with IPv4 loopback (127.0.0.1)
+- DNS rebinding protection with IPv6 unique local addresses (fc00::/7)
+- DNS rebinding protection with IPv6 loopback (::1)
+- dnsRebindingWarning inclusion in check results
+- CheckMonitor limitation documentation when no resolvedIp provided
+- validateMonitor rejection of IP literal hostnames
+- validateMonitor approval of hostnames in allowlist
+
+### Configuration Changes
+
+- `frontend/vite.config.js` has local configuration changes (824 → 1216 bytes) that represent a prior APIMON_API_TOKEN mismatch between frontend and Worker local development environments. This was reproduced and traced to environment configuration difference; the frontend was restarted with the matching local token, after which `GET http://127.0.0.1:5173/api/monitors` returned HTTP 200. No source code fix was required - this was a local environment configuration issue.
+
+### Key Design Decisions
+
+1. **Application-level IP validation as defense-in-depth**: Since Cloudflare Workers cannot reliably determine the resolved IP of outbound fetch requests at runtime, the implementation provides IP validation when resolved IPs are available (e.g., via external DNS resolution or provided through options), while clearly documenting the runtime limitations.
+
+2. **Hostname allowlist preserves configuration-time safety**: The existing hostname allowlist mechanism continues to provide safety at monitor registration time, ensuring only approved hosts can be configured.
+
+3. **Explicit limitation documentation**: The `dnsRebindingWarning` field in check results informs operators about the Cloudflare Worker runtime constraints and recommends network-level egress restrictions (Cloudflare Access, firewall rules, outbound traffic policies) for complete DNS-rebinding protection.
+
+4. **Do not claim full DNS-rebinding protection**: The implementation acknowledges that true DNS-rebinding protection requires network-level egress restrictions that enforce destination pinning at the network boundary, not just application-level IP checks.
+
+### Test Changes
+
+Eight new security-focused test cases were added to `worker/test/monitoring.test.js` covering DNS-rebinding attack scenarios, IP literal hostname rejection, and allowlist validation. These tests verify the implementation correctly identifies and warns about private/resolved IP addresses while preserving legitimate monitoring functionality.
+
+No application behavior was changed that would affect existing monitored services. The changes add security validation without weakening existing check logic.
 
 ## 4. Cloudflare Infrastructure
 

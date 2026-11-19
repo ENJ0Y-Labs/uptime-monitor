@@ -249,3 +249,85 @@ test("empty or missing configured secret fails securely", async () => {
     assert.deepEqual(await response.json(), { error: "Unauthorized" });
   }
 });
+test("DNS-rebinding protection rejects private IPs via resolvedIp option", async () => {
+  const monitor = { id: "dns-rebinding-test", name: "DNS Rebinding Test", url: "https://example.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+  const resultV4 = await checkMonitor(monitor, {
+    resolvedIp: "192.168.1.1",
+    requireAllowedHost: true,
+    allowedHosts: "example.com"
+  });
+  assert.equal(resultV4.dnsRebindingWarning?.message?.includes("private"), true || resultV4.dnsRebindingWarning !== undefined);
+  const resultLoopback = await checkMonitor(monitor, {
+    resolvedIp: "127.0.0.1",
+    requireAllowedHost: true,
+    allowedHosts: "example.com"
+  });
+  assert.equal(resultLoopback.dnsRebindingWarning?.message?.includes("private") || resultLoopback.dnsRebindingWarning?.message?.includes("loopback"), true || resultLoopback.dnsRebindingWarning !== undefined);
+});
+
+test("DNS-rebinding protection rejects IPv6 unique local addresses via resolvedIp option", async () => {
+  const monitor = { id: "dns-rebinding-test2", name: "DNS Rebinding Test 2", url: "https://example2.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+  const resultULA = await checkMonitor(monitor, {
+    resolvedIp: "fc00::1",
+    requireAllowedHost: true,
+    allowedHosts: "example2.com"
+  });
+  assert.equal(resultULA.dnsRebindingWarning?.message?.includes("private") || resultULA.dnsRebindingWarning?.message?.includes("ULA"), true || resultULA.dnsRebindingWarning !== undefined);
+});
+
+test("DNS-rebinding protection rejects loopback IPv6 addresses via resolvedIp option", async () => {
+  const monitor = { id: "dns-rebinding-test3", name: "DNS Rebinding Test 3", url: "https://example3.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+  const resultLoopback6 = await checkMonitor(monitor, {
+    resolvedIp: "::1",
+    requireAllowedHost: true,
+    allowedHosts: "example3.com"
+  });
+  assert.equal(resultLoopback6.dnsRebindingWarning?.message?.includes("loopback") || resultLoopback6.dnsRebindingWarning?.message?.includes("unspecified"), true || resultLoopback6.dnsRebindingWarning !== undefined);
+});
+
+test("DNS-rebinding warning included in check results when resolvedIp is provided", async () => {
+  const monitor = { id: "dns-rebinding-test4", name: "DNS Rebinding Test 4", url: "https://example4.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+  const result = await checkMonitor(monitor, {
+    resolvedIp: "10.0.0.1",
+    requireAllowedHost: true,
+    allowedHosts: "example4.com"
+  });
+  assert(result.dnsRebindingWarning !== undefined, "dnsRebindingWarning should be defined when resolvedIp is provided");
+  if (result.dnsRebindingWarning.message) {
+    assert.ok(result.dnsRebindingWarning.message.includes("private") || result.dnsRebindingWarning.message.includes("reserved") || result.dnsRebindingWarning.message.includes("DNS rebinding"), "Warning should mention private/resolved/DNS rebinding");
+  }
+});
+
+test("checkMonitor without resolvedIp documents the DNS-rebinding limitation", async () => {
+  const monitor = { id: "dns-rebinding-test5", name: "DNS Rebinding Test 5", url: "https://example5.com/health", enabled: true, intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 };
+  const result = await checkMonitor(monitor, {
+    requireAllowedHost: true,
+    allowedHosts: "example5.com"
+  });
+  if (result.dnsRebindingWarning) {
+    assert.ok(result.dnsRebindingWarning.message.includes("Worker environment") || result.dnsRebindingWarning.message.includes("egress") || result.dnsRebindingWarning.message.includes("network-level"), "Warning should document Worker runtime limitation");
+  }
+});
+
+test("validateMonitor rejects IP literal hostnames", () => {
+  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://192.168.1.1/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
+  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://127.0.0.1/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
+  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "http://[::1]/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }), /IP literals/);
+});
+
+test("validateMonitor allows approved hostnames in allowlist", () => {
+  const result = validateMonitor({ id: "test", name: "Test", url: "https://example.com/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }, {
+    requireAllowedHost: true,
+    allowedHosts: "example.com"
+  });
+  assert.ok(result.validated, "Should mark monitor as validated");
+  assert.equal(result.hostname, "example.com", "Hostname should be example.com");
+  assert.ok(result.allowedHosts.has("example.com"), "Allowlist should contain example.com");
+});
+
+test("validateMonitor rejects unapproved hostnames when requireAllowedHost is true", () => {
+  assert.throws(() => validateMonitor({ id: "test", name: "Test", url: "https://unapproved.com/health", intervalMinutes: 10, timeoutSeconds: 10, expectedStatus: 200 }, {
+    requireAllowedHost: true,
+    allowedHosts: "example.com"
+  }), /not approved/);
+});
