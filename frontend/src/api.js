@@ -7,7 +7,7 @@ export function setApiToken(token) {
 }
 
 export function createApiClient(baseUrl, fetchImpl = fetch, allowRelativeUrl = false, tokenProvider = () => activeApiToken) {
-  const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\\/+$/, '');
+  const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
 
   async function request(path, options = {}) {
     if (!normalizedBaseUrl && !allowRelativeUrl) {
