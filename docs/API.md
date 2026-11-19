@@ -96,15 +96,15 @@ These internal endpoints or storage interfaces must not be exposed as ordinary u
 
 ## Implemented Worker API contract (dashboard integration)
 
-The React dashboard uses the Cloudflare Worker API directly. The Worker API is a single protected workspace interface, not a per-user account API. Do not expose its service token to browser code.
+The React dashboard uses the Cloudflare Worker API directly. The Worker API is a single shared workspace interface, not a per-user account API. The operator enters the bearer token in the dashboard connection screen.
 
 ### Base URL and authentication
 
 - Base URL: the deployed Worker API origin, configured in the frontend with VITE_APIMON_API_BASE_URL.
-- Browser authentication: Cloudflare Access protects the Worker API. The Worker reads the authenticated identity from the Workers Access request context and checks its email against APIMON_ALLOWED_EMAILS.
-- Server-to-server authentication: trusted clients may continue using Authorization: Bearer APIMON_API_TOKEN.
-- Browser requests use credentialed CORS. APIMON_ALLOWED_ORIGIN must exactly match the deployed dashboard origin.
-- The service token must never be placed in a VITE_ variable, HTML, JavaScript bundle, browser storage, or browser request header.
+- Authentication: every protected API request must send `Authorization: Bearer <APIMON_API_TOKEN>`. The Worker validates this token against its server-side secret.
+- The dashboard asks the operator to enter the token. It is held in JavaScript memory only, sent in the Authorization header, and cleared on refresh or sign out.
+- Browser requests do not use cookies. `APIMON_ALLOWED_ORIGIN` must exactly match the deployed dashboard origin and is enforced as a CORS origin restriction, not as authentication.
+- Never put the token in a `VITE_` variable, HTML, a static JavaScript bundle, or browser storage. Because the browser sends it as a bearer credential, an operator can inspect it in developer tools during an authenticated session.
 
 ### Routes and response envelopes
 
@@ -138,13 +138,11 @@ Each persisted result includes id, monitorId, status (UP or DOWN), httpStatusCod
 
 The dashboard refreshes data on page load, on user request, and every 60 seconds. Refreshing the dashboard does not trigger a scheduled check.
 
-### Access and CORS deployment requirements
+### Bearer authentication and CORS deployment requirements
 
-Configure Cloudflare Access to protect the Worker API. Allow only the intended operators in the Access policy and configure the same exact email addresses in APIMON_ALLOWED_EMAILS. Set APIMON_ALLOWED_ORIGIN to the exact dashboard origin.
+Set `APIMON_API_TOKEN` as a Worker secret and configure `APIMON_ALLOWED_ORIGIN` to the exact dashboard origin. Do not protect the Worker API hostname with Cloudflare Access; an Access edge policy can intercept the request before the Worker receives the bearer header.
 
-Browser CORS preflight requests use OPTIONS and do not carry the user's Access session credentials. Configure the Access policy to let OPTIONS preflight requests reach the Worker. The Worker responds only for the configured origin and returns no monitor data to preflight requests.
-
-The Worker API currently grants allowlisted operators access to the shared workspace. Per-user monitor ownership, registration, and account-level authorization are not implemented by this phase.
+The dashboard sends `Authorization: Bearer <token>` and omits cookies. CORS preflight requests use OPTIONS and return an empty 204 only for the configured origin. The Worker API currently grants token holders access to the shared workspace. Per-user monitor ownership, registration, and account-level authorization are not implemented by this phase.
 
 ## Standard failure behavior
 
