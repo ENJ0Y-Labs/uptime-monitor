@@ -60,13 +60,13 @@ function isNonPublicHostname(hostname) {
 /**
  * Convert an IPv4 address string to a 32-bit integer for comparison.
  */
+function isValidIpv4(ip) {
+  const parts = ip.split(".");
+  return parts.length === 4 && parts.every((part) => /^\\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
 function ipv4ToInteger(ip) {
-  const parts = ip
-    .split(".")
-    .map((part) => {
-      const p = Number(part);
-      return isNaN(p) ? 0 : p;
-    });
+  const parts = ip.split(".").map(Number);
   return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
 }
 
@@ -106,11 +106,12 @@ function isPrivateIpv4(ip) {
 function isPrivateIpv6(ip) {
   if (!ip.includes(":")) return null;
 
+  const normalizedIp = ip.toLowerCase();
   for (const entry of PRIVATE_IPV6_PREFIXES) {
-    const regex = new RegExp(`^${entry.prefix}`);
-    if (regex.test(ip)) {
-      return entry.name;
-    }
+    const matches = entry.prefix === "::1"
+      ? normalizedIp === "::1"
+      : normalizedIp.startsWith(entry.prefix);
+    if (matches) return entry.name;
   }
   // Check for unspecified address ::0
   if (ip === "::") return "IPv6 unspecified";
@@ -144,8 +145,8 @@ export function parseAllowedHostsSet(value) {
 }
 
 /**
- * Validate the resolved destination IP against private/reserved ranges.
- * Provides DNS-rebinding protection through IP address validation.
+ * Screen a caller-supplied destination IP against known private/reserved ranges.
+ * This is preflight validation only; it does not resolve DNS or pin fetch connections.
  * 
  * NOTE: In Cloudflare Worker runtime, the actual resolved IP of an outbound fetch
  * cannot be reliably determined due to the architecture. This function is designed
