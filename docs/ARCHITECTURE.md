@@ -98,7 +98,7 @@ Cloudflare Cron Trigger schedules use UTC cron expressions. The exact trigger st
 - Database: Cloudflare D1 bound as `APIMON_DB`.
 - Worker Cron Trigger: every minute; monitor-specific intervals are enforced from D1.
 
-The deployment workflow runs tests, applies remote D1 migrations, writes Worker secrets, deploys the Worker, builds the frontend with its public API origin, and publishes Pages assets. Cloudflare Access policies, DNS/custom domains, and the Pages project remain one-time account configuration. See `docs/DEPLOYMENT.md`.
+The deployment workflow runs tests, applies remote D1 migrations, writes Worker secrets, deploys the Worker, builds the frontend with its public API origin, and publishes Pages assets. DNS/custom domains and the Pages project remain one-time account configuration. The Worker API hostname must not be protected by Cloudflare Access; see `docs/DEPLOYMENT.md`. See `docs/DEPLOYMENT.md`.
 
 ## 8. Phase 3 implementation boundary
 
