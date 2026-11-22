@@ -212,11 +212,19 @@ export default function App() {
   useEffect(() => {
     if (!drawerOpen) return undefined;
     const previous = document.activeElement;
-    const closeOnEscape = event => { if (event.key === 'Escape') setDrawerOpen(false); };
-    document.addEventListener('keydown', closeOnEscape);
+    const handleDrawerKeyDown = event => {
+      if (event.key === 'Escape') { setDrawerOpen(false); return; }
+      if (event.key !== 'Tab') return;
+      const drawer = document.querySelector('.sidebar');
+      const items = Array.from(drawer?.querySelectorAll('a[href],button:not([disabled])') ?? []);
+      if (!items.length) return;
+      if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items[items.length - 1].focus(); }
+      else if (!event.shiftKey && document.activeElement === items[items.length - 1]) { event.preventDefault(); items[0].focus(); }
+    };
+    document.addEventListener('keydown', handleDrawerKeyDown);
     document.body.classList.add('drawer-open');
     document.querySelector('.sidebar a, .sidebar button')?.focus();
-    return () => { document.removeEventListener('keydown', closeOnEscape); document.body.classList.remove('drawer-open'); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+    return () => { document.removeEventListener('keydown', handleDrawerKeyDown); document.body.classList.remove('drawer-open'); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, [drawerOpen]);
 
   useEffect(() => {
@@ -318,6 +326,7 @@ export default function App() {
       } else {
         const updatedMonitor = readMonitorResponse(result);
         setMonitors(current => current.map(item => item.id === updatedMonitor.id ? updatedMonitor : item));
+        if (historyMonitor?.id === updatedMonitor.id) setHistoryMonitor(updatedMonitor);
       }
       await refresh({ silent: true });
       notify(message);
