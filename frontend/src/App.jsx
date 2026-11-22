@@ -283,7 +283,7 @@ export default function App() {
   }
 
   if (!API_CONFIGURED) {
-    return <main className="auth-screen"><section className="auth-card"><span className="brand-mark">A</span><span className="eyebrow">APIMON SETUP</span><h1>API configuration required</h1><p>Set VITE_APIMON_API_BASE_URL to the deployed Worker API origin and rebuild the dashboard.</p></section></main>;
+    return <main className="auth-screen" data-theme={theme}><section className="auth-card"><span className="brand-mark">A</span><span className="eyebrow">APIMON SETUP</span><h1>API configuration required</h1><p>Set VITE_APIMON_API_BASE_URL to the deployed Worker API origin and rebuild the dashboard.</p></section></main>;
   }
 
   if (!authenticated) {
