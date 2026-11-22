@@ -37,6 +37,30 @@ function StatusBadge({ monitor, latest }) {
     : <span className="status-badge down-badge"><i/>Down</span>;
 }
 
+
+function useDialogAccessibility(dialogRef, onClose) {
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    const previous = document.activeElement;
+    const selector = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const focusables = () => Array.from(dialog.querySelectorAll(selector)).filter(element => !element.hasAttribute('hidden'));
+    (focusables()[0] || dialog).focus();
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current?.(); return; }
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (!items.length) { event.preventDefault(); dialog.focus(); return; }
+      if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items[items.length - 1].focus(); }
+      else if (!event.shiftKey && document.activeElement === items[items.length - 1]) { event.preventDefault(); items[0].focus(); }
+    }
+    dialog.addEventListener('keydown', handleKeyDown);
+    return () => { dialog.removeEventListener('keydown', handleKeyDown); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, []);
+}
+
 function MonitorModal({ monitor, onClose, onSave }) {
   const [name, setName] = useState(monitor?.name ?? '');
   const [url, setUrl] = useState(monitor?.url ?? '');
@@ -45,6 +69,8 @@ function MonitorModal({ monitor, onClose, onSave }) {
   const [expectedStatus, setExpectedStatus] = useState(String(monitor?.expectedStatus ?? 200));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const dialogRef = useRef(null);
+  useDialogAccessibility(dialogRef, onClose);
 
   async function submit(event) {
     event.preventDefault();
@@ -63,7 +89,7 @@ function MonitorModal({ monitor, onClose, onSave }) {
   }
 
   return <div className="modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <section ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex="-1">
       <div className="modal-head"><div><span className="eyebrow">{monitor ? 'EDIT CONFIGURATION' : 'NEW MONITOR'}</span><h2 id="modal-title">{monitor ? 'Edit monitor' : 'Add a monitor'}</h2><p>Changes are saved to APIMON's monitoring database.</p></div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><Icon name="close"/></button></div>
       <form onSubmit={submit}>
         <label>Monitor name<input id="monitor-name" name="name" autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="e.g. RetailOS Backend" maxLength="80" required/></label>
@@ -90,19 +116,59 @@ function ResponseTimeChart({ results }) {
   </div>;
 }
 
-function HistoryModal({ monitor, results, loading, error, onRetry, onClose }) {
+
+function HistoryModal({ monitor, results, loading, error, onRetry, onClose, onEdit, onToggle, onDelete, busyId }) {
+  const dialogRef = useRef(null);
+  useDialogAccessibility(dialogRef, onClose);
   const chronologicalResults = [...results].sort((left, right) => Date.parse(left.checkedAt) - Date.parse(right.checkedAt));
-  return <div className="modal-backdrop history-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-    <section className="modal history-modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
-      <div className="modal-head"><div><span className="eyebrow">MONITOR HISTORY</span><h2 id="history-title">{monitor.name}</h2><p>{monitor.url}</p></div><button className="icon-button" onClick={onClose} aria-label="Close history"><Icon name="close"/></button></div>
-      {error && <div className="api-banner error-banner" role="alert"><span>{error}</span><button onClick={onRetry} disabled={loading}>Retry</button></div>}
-      {loading && <p role="status">Loading check history…</p>}
-      <section className="history-chart-section"><div className="history-section-title"><h3>Response time</h3><span>Persisted check results only</span></div><ResponseTimeChart results={results}/></section>
-      <section className="history-results"><div className="history-section-title"><h3>Recent checks</h3><span>{results.length} records</span></div>
-        {chronologicalResults.length ? <div className="history-table-wrap"><table><thead><tr><th>RESULT</th><th>CHECKED AT</th><th>HTTP</th><th>RESPONSE</th><th>DETAIL</th></tr></thead><tbody>
-          {chronologicalResults.map(item => <tr key={item.id}><td><span className={'status-badge ' + (item.status === 'UP' ? 'up-badge' : 'down-badge')}><i/>{item.status}</span></td><td>{formatDate(item.checkedAt)}</td><td>{item.httpStatusCode ?? '—'}</td><td>{formatLatency(item.responseTimeMs)}</td><td>{item.errorMessage || '—'}</td></tr>)}
-        </tbody></table></div> : !loading && <div className="history-no-results">No checks have been recorded for this monitor yet.</div>}
-      </section><div className="modal-actions"><button className="button button-quiet" onClick={onClose}>Close</button></div>
+  const latest = results[0] ?? null;
+  return <div className="modal-backdrop monitor-details-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+    <div className="monitor-frame-animate monitor-frame">
+      <section ref={dialogRef} className="monitor-inner-screen" role="dialog" aria-modal="true" aria-labelledby="history-title" tabIndex="-1">
+        <div className="screen-scanlines" aria-hidden="true"/>
+        <div className="monitor-screen-content">
+          <header className="details-header"><div className="details-identity"><span className="details-symbol" aria-hidden="true">↗</span><div className="details-heading-copy">
+            <div className="details-title-line"><h2 id="history-title">{monitor.name}</h2><span className="method-badge">HTTP</span><StatusBadge monitor={monitor} latest={latest}/></div>
+            <a className="details-url" href={monitor.url} target="_blank" rel="noreferrer">{monitor.url}</a>
+          </div></div><button className="icon-button details-close" onClick={onClose} aria-label="Close monitor details"><Icon name="close"/></button></header>
+          <section className="details-metrics" aria-label="Monitor configuration and latest result">
+            <article className="details-metric"><span>Check interval</span><strong>{monitor.intervalMinutes} min</strong></article>
+            <article className="details-metric"><span>Timeout</span><strong>{monitor.timeoutSeconds}s</strong></article>
+            <article className="details-metric"><span>Expected status</span><strong>HTTP {monitor.expectedStatus}</strong></article>
+            <article className="details-metric"><span>Latest response</span><strong>{formatLatency(latest?.responseTimeMs)}</strong><small>{latest ? formatDate(latest.checkedAt) : 'No check recorded'}</small></article>
+          </section>
+          <section className="history-chart-section details-history-section">
+            <div className="history-section-title"><h3><Icon name="history"/> Recent check history</h3><span>Persisted check results only</span></div>
+            {error && <div className="api-banner error-banner" role="alert"><span>{error}</span><button onClick={onRetry} disabled={loading}>Retry</button></div>}
+            {loading && <p className="details-loading" role="status">Loading check history…</p>}
+            <ResponseTimeChart results={results}/>
+          </section>
+          <section className="history-results details-results"><div className="history-section-title"><h3>Recent checks</h3><span>{results.length} records</span></div>
+            {chronologicalResults.length ? <div className="history-table-wrap"><table><thead><tr><th>RESULT</th><th>CHECKED AT</th><th>HTTP</th><th>RESPONSE</th><th>DETAIL</th></tr></thead><tbody>
+              {chronologicalResults.map(item => <tr key={item.id}><td><span className={'status-badge ' + (item.status === 'UP' ? 'up-badge' : 'down-badge')}><i/>{item.status}</span></td><td>{formatDate(item.checkedAt)}</td><td>{item.httpStatusCode ?? '—'}</td><td>{formatLatency(item.responseTimeMs)}</td><td>{item.errorMessage || '—'}</td></tr>)}
+            </tbody></table></div> : !loading && <div className="history-no-results">No checks have been recorded for this monitor yet.</div>}
+          </section>
+          <footer className="details-actions"><div className="details-action-group">
+            <button className="button button-outline" onClick={onEdit}><Icon name="edit"/> Edit monitor</button>
+            <button className="button button-outline" disabled={busyId === monitor.id} onClick={onToggle}><Icon name={monitor.enabled ? 'pause' : 'play'}/>{monitor.enabled ? 'Pause' : 'Resume'}</button>
+            <button className="button button-danger-quiet" disabled={busyId === monitor.id} onClick={onDelete}><Icon name="trash"/> Delete</button>
+          </div><button className="button button-primary" onClick={onClose}>Close</button></footer>
+        </div>
+      </section>
+      <div className="monitor-chin" aria-hidden="true"><span>APIMON</span><i/></div><div className="monitor-stand" aria-hidden="true"><span/></div>
+    </div>
+  </div>;
+}
+
+function DeleteDialog({ monitor, onCancel, onConfirm, busy }) {
+  const dialogRef = useRef(null);
+  useDialogAccessibility(dialogRef, onCancel);
+  if (!monitor) return null;
+  return <div className="modal-backdrop delete-backdrop" onMouseDown={event => event.target === event.currentTarget && onCancel()}>
+    <section ref={dialogRef} className="delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description" tabIndex="-1">
+      <div className="delete-dialog-icon"><Icon name="alert"/></div>
+      <div className="delete-dialog-copy"><span className="eyebrow">PERMANENT ACTION</span><h2 id="delete-title">Delete monitor?</h2><p id="delete-description">Delete <strong>{monitor.name}</strong>? Its stored check history will also be deleted. This action cannot be undone.</p></div>
+      <div className="modal-actions"><button className="button button-quiet" onClick={onCancel} disabled={busy}>Cancel</button><button className="button button-danger" onClick={onConfirm} disabled={busy}>{busy ? 'Deleting…' : 'Delete monitor'}</button></div>
     </section>
   </div>;
 }
@@ -128,6 +194,8 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('apimon_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
     catch { return 'dark'; }
@@ -136,7 +204,20 @@ export default function App() {
 
   useEffect(() => {
     try { localStorage.setItem('apimon_theme', theme); } catch { /* Theme preference is optional. */ }
+    document.documentElement.dataset.theme = theme;
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    themeMeta?.setAttribute('content', theme === 'dark' ? '#0b1326' : '#f8fafc');
   }, [theme]);
+
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const previous = document.activeElement;
+    const closeOnEscape = event => { if (event.key === 'Escape') setDrawerOpen(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    document.body.classList.add('drawer-open');
+    document.querySelector('.sidebar a, .sidebar button')?.focus();
+    return () => { document.removeEventListener('keydown', closeOnEscape); document.body.classList.remove('drawer-open'); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, [drawerOpen]);
 
   useEffect(() => {
     if (busyId || !savedTrigger.current) return;
@@ -246,9 +327,12 @@ export default function App() {
       setBusyId('');
     }
   }
-  async function deleteMonitor(monitor) {
-    if (!window.confirm('Delete ' + monitor.name + '? Its stored check history will also be deleted.')) return;
-    await runAction(monitor, api.deleteMonitor, 'Monitor deleted.');
+  async function deleteMonitor(monitor) { setDeleteTarget(monitor); }
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    await runAction(target, api.deleteMonitor, 'Monitor deleted.');
   }
   function openCreateModal() { setModalMonitor(null); setModalOpen(true); }
 
@@ -328,45 +412,48 @@ export default function App() {
     </main>;
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <a className="brand" href="#" aria-label="APIMON home"><span className="brand-mark">A</span><span>APIMON<span className="brand-dot">.</span><small>STATUS, WITHOUT GUESSWORK.</small></span></a>
+
+  return <div className="app-shell" data-theme={theme}>
+    <a className="skip-link" href="#main-content">Skip to main content</a>
+    <div className="ambient-bg" aria-hidden="true"/><div className="grid-pattern" aria-hidden="true"/>
+    {drawerOpen && <button className="drawer-backdrop" type="button" aria-label="Close navigation" onClick={() => setDrawerOpen(false)}/>}
+    <aside className={'sidebar' + (drawerOpen ? ' sidebar-open' : '')} aria-label="APIMON navigation">
+      <div className="sidebar-top"><a className="brand" href="#main-content" aria-label="APIMON home"><span className="brand-mark">A</span><span>APIMON<span className="brand-dot">.</span><small>STATUS, NO GUESSWORK.</small></span></a><button className="icon-button drawer-close" type="button" onClick={() => setDrawerOpen(false)} aria-label="Close navigation"><Icon name="close"/></button></div>
       <div className="workspace-label">WORKSPACE</div><div className="workspace-switch"><span className="workspace-avatar">A</span><span><b>APIMON Workspace</b><small>Bearer token protected</small></span></div>
-      <div className="nav-label">MONITORING</div><nav className="side-nav"><button className="active" type="button"><Icon name="clock"/>Monitors<span className="nav-count">{counts.total}</span></button></nav>
+      <div className="nav-label">MONITORING</div><nav className="side-nav" aria-label="Main navigation"><button className="active" type="button" aria-current="page" onClick={() => setDrawerOpen(false)}><Icon name="clock"/>Monitors<span className="nav-count">{counts.total}</span></button></nav>
       <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">i</span><b>Live monitoring data</b><p>Monitor settings and check history are loaded from the Worker API.</p><a href="https://github.com/ENJ0Y-Labs/uptime-monitor" target="_blank" rel="noreferrer">Project repository ↗</a></div><div className="profile-row"><div className="profile-avatar">A</div><span><b>APIMON</b><small>Token-authenticated workspace</small></span></div></div>
     </aside>
-    <main className="main-area">
-      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div><div className="top-actions"><span className="worker-status-pill" title="Worker API status: Unknown"><i aria-hidden="true"/> Worker API · Unknown</span><button className="button button-quiet" onClick={logout}>Sign out</button><div className="profile-avatar small-avatar">A</div></div></header>
+    <main className="main-area" id="main-content" tabIndex="-1">
+      <header className="topbar"><div className="topbar-leading"><button className="icon-button menu-toggle" type="button" onClick={() => setDrawerOpen(true)} aria-label="Open navigation" aria-expanded={drawerOpen}><span className="menu-glyph">☰</span></button><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div></div>
+        <div className="top-actions"><span className="worker-status-pill" title="Worker API status: Unknown"><i aria-hidden="true"/> Worker API · Unknown</span><button className="theme-toggle-btn dashboard-theme-toggle" type="button" onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={theme === 'dark'} title="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'}/></button><button className="button button-quiet sign-out-button" onClick={logout}>Sign out</button><div className="profile-avatar small-avatar">A</div></div>
+      </header>
       <div className="page-content">
         <div className="page-heading"><div><span className="eyebrow">APIMON WORKSPACE</span><h1>Monitors</h1><p>Manage endpoints and review their real monitoring results.</p></div><div className="heading-actions"><button className="button button-outline" onClick={() => refresh()} disabled={refreshing}><Icon name="refresh"/>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="button button-primary" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> Add monitor</button></div></div>
         {error && <div className="api-banner error-banner" role="alert"><span className="demo-banner-icon">!</span><span><b>API request failed.</b> {error}</span><button onClick={() => refresh()}>Retry</button></div>}
         {!API_CONFIGURED && <div className="api-banner" role="status"><span className="demo-banner-icon">i</span><span><b>API configuration required.</b> Set VITE_APIMON_API_BASE_URL to the deployed Worker API URL and rebuild. Enter the API token when connecting; it is not bundled into the app.</span></div>}
-        <section className="stats-grid">
+        <section className="stats-grid" aria-label="Monitor summary">
           <article className="stat-card"><div className="stat-top"><span>Total monitors</span><span className="stat-icon neutral"><Icon name="clock"/></span></div><strong>{counts.total}</strong><small>Stored in APIMON D1</small></article>
           <article className="stat-card"><div className="stat-top"><span>Operational</span><span className="stat-icon green"><Icon name="check"/></span></div><strong>{counts.up}</strong><small>Latest recorded check is UP</small></article>
           <article className="stat-card"><div className="stat-top"><span>Down</span><span className="stat-icon red"><Icon name="alert"/></span></div><strong>{counts.down}</strong><small>Latest recorded check is DOWN</small></article>
           <article className="stat-card"><div className="stat-top"><span>Awaiting first check</span><span className="stat-icon neutral"><Icon name="history"/></span></div><strong>{counts.unknown}</strong><small>{counts.paused} paused · {counts.active} active</small></article>
         </section>
-        <section className="content-card monitor-card">
-          <div className="section-heading"><div><h2>Your monitors</h2><p>Configuration and latest persisted check result.</p></div><button className="button button-outline" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> New monitor</button></div>
-          <div className="table-toolbar"><div className="filter-tabs"><button className={filter === 'all' ? 'chosen' : ''} onClick={() => setFilter('all')}>All <span>{counts.total}</span></button><button className={filter === 'active' ? 'chosen' : ''} onClick={() => setFilter('active')}>Active</button><button className={filter === 'paused' ? 'chosen' : ''} onClick={() => setFilter('paused')}>Paused</button></div><label className="search-box"><Icon name="search"/><input id="monitor-search" name="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search monitors..."/></label></div>
-          <div className="table-wrap"><table><thead><tr><th>MONITOR</th><th>CONFIGURATION</th><th>STATUS</th><th>LAST CHECK</th><th>RESPONSE</th><th>ACTIONS</th></tr></thead><tbody>
-            {loading && <tr><td colSpan="6"><div className="empty-state"><b>Loading monitors…</b><p>Connecting to the APIMON Worker API.</p></div></td></tr>}
-            {!loading && visible.map(monitor => {
-              const latest = latestFor(monitor);
-              return <tr key={monitor.id}>
-                <td><div className="monitor-name"><span className="monitor-symbol">↗</span><span><b>{monitor.name}</b><small>{monitor.url}</small></span></div></td>
-                <td className="config-cell">{monitor.intervalMinutes} min · {monitor.timeoutSeconds}s · HTTP {monitor.expectedStatus}</td>
-                <td><StatusBadge monitor={monitor} latest={latest}/></td><td className="last-check">{formatDate(latest?.checkedAt || monitor.lastCheckedAt)}</td><td className="latency">{formatLatency(latest?.responseTimeMs)}</td>
-                <td><div className="row-actions">
-                  <button data-trigger={monitor.id + ':history'} title="View check history" aria-label={'View history for ' + monitor.name} onClick={() => openHistory(monitor)} className="btn-open-details"><Icon name="history"/></button>
-                  <button data-trigger={monitor.id + ':edit'} title="Edit monitor" aria-label={'Edit ' + monitor.name} onClick={() => { setModalMonitor(monitor); setModalOpen(true); }}><Icon name="edit"/></button>
-                  <button data-trigger={monitor.id + ':toggle'} title={monitor.enabled ? 'Pause monitor' : 'Resume monitor'} aria-label={(monitor.enabled ? 'Pause ' : 'Resume ') + monitor.name} disabled={busyId === monitor.id} onClick={() => { savedTrigger.current = monitor.id + ':toggle'; runAction(monitor, monitor.enabled ? api.pauseMonitor : api.resumeMonitor, monitor.enabled ? 'Monitor paused.' : 'Monitor resumed.'); }}>{monitor.enabled ? <Icon name="pause"/> : <Icon name="play"/>}</button>
-                  <button data-trigger={monitor.id + ':delete'} title="Delete monitor" aria-label={'Delete ' + monitor.name} disabled={busyId === monitor.id} onClick={() => deleteMonitor(monitor)}><Icon name="trash"/></button>
-                </div></td>
-              </tr>;
-            })}
-            {!loading && visible.length === 0 && <tr><td colSpan="6"><div className="empty-state"><span>⌕</span><b>{monitors.length ? 'No matching monitors' : !API_CONFIGURED ? 'API not configured' : error ? 'Monitor data unavailable' : 'No monitors yet'}</b><p>{monitors.length ? 'Try another search or filter.' : !API_CONFIGURED ? 'Configure the Worker API URL to load monitor data.' : error ? 'APIMON could not confirm whether monitors exist. Retry the API request.' : 'Add the RetailOS health endpoint to start monitoring it.'}</p>{monitors.length === 0 && !error && API_CONFIGURED && <button className="button button-primary" onClick={openCreateModal}><Icon name="plus"/> Add monitor</button>}</div></td></tr>}
+        <section className="content-card monitor-card" aria-labelledby="monitor-list-title">
+          <div className="section-heading"><div><h2 id="monitor-list-title">Your monitors</h2><p>Configuration and latest persisted check result.</p></div><button className="button button-outline" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> New monitor</button></div>
+          <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter monitors"><button type="button" className={filter === 'all' ? 'chosen' : ''} aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All <span>{counts.total}</span></button><button type="button" className={filter === 'active' ? 'chosen' : ''} aria-pressed={filter === 'active'} onClick={() => setFilter('active')}>Active <span>{counts.active}</span></button><button type="button" className={filter === 'paused' ? 'chosen' : ''} aria-pressed={filter === 'paused'} onClick={() => setFilter('paused')}>Paused <span>{counts.paused}</span></button></div><label className="search-box" htmlFor="monitor-search"><Icon name="search"/><input id="monitor-search" name="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search monitors..."/></label></div>
+          <div className="table-wrap" data-state={loading ? 'loading' : error ? 'error' : 'ready'}><table className="responsive-table"><thead><tr><th scope="col">MONITOR</th><th scope="col">CONFIGURATION</th><th scope="col">STATUS</th><th scope="col">LAST CHECK</th><th scope="col">RESPONSE</th><th scope="col">ACTIONS</th></tr></thead><tbody>
+            {loading && <tr className="state-loading"><td colSpan="6"><div className="empty-state"><span className="loading-spinner"/><b>Loading monitors…</b><p>Connecting to the APIMON Worker API.</p></div></td></tr>}
+            {!loading && visible.map(monitor => { const latest = latestFor(monitor); return <tr key={monitor.id}>
+              <td data-label="Monitor"><div className="monitor-name"><span className="monitor-symbol">↗</span><span><b>{monitor.name}</b><small>{monitor.url}</small></span></div></td>
+              <td data-label="Configuration" className="config-cell"><span className="config-value">{monitor.intervalMinutes} min · {monitor.timeoutSeconds}s · HTTP {monitor.expectedStatus}</span></td>
+              <td data-label="Status"><StatusBadge monitor={monitor} latest={latest}/></td><td data-label="Last check" className="last-check">{formatDate(latest?.checkedAt || monitor.lastCheckedAt)}</td><td data-label="Response" className="latency">{formatLatency(latest?.responseTimeMs)}</td>
+              <td data-label="Actions"><div className="row-actions">
+                <button data-trigger={monitor.id + ':history'} title="View monitor details and check history" aria-label={'View details for ' + monitor.name} onClick={() => openHistory(monitor)} className="btn-open-details"><Icon name="history"/></button>
+                <button data-trigger={monitor.id + ':edit'} title="Edit monitor" aria-label={'Edit ' + monitor.name} onClick={() => { setModalMonitor(monitor); setModalOpen(true); }}><Icon name="edit"/></button>
+                <button data-trigger={monitor.id + ':toggle'} title={monitor.enabled ? 'Pause monitor' : 'Resume monitor'} aria-label={(monitor.enabled ? 'Pause ' : 'Resume ') + monitor.name} disabled={busyId === monitor.id} onClick={() => { savedTrigger.current = monitor.id + ':toggle'; runAction(monitor, monitor.enabled ? api.pauseMonitor : api.resumeMonitor, monitor.enabled ? 'Monitor paused.' : 'Monitor resumed.'); }}>{monitor.enabled ? <Icon name="pause"/> : <Icon name="play"/>}</button>
+                <button data-trigger={monitor.id + ':delete'} title="Delete monitor" aria-label={'Delete ' + monitor.name} disabled={busyId === monitor.id} onClick={() => deleteMonitor(monitor)}><Icon name="trash"/></button>
+              </div></td>
+            </tr>; })}
+            {!loading && visible.length === 0 && <tr className="state-ready"><td colSpan="6"><div className="empty-state"><span className="empty-state-icon">⌕</span><b>{monitors.length ? 'No matching monitors' : !API_CONFIGURED ? 'API not configured' : error ? 'Monitor data unavailable' : 'No monitors yet'}</b><p>{monitors.length ? 'Try another search or filter.' : !API_CONFIGURED ? 'Configure the Worker API URL to load monitor data.' : error ? 'APIMON could not confirm whether monitors exist. Retry the API request.' : 'Add a health endpoint to start monitoring it.'}</p>{monitors.length === 0 && !error && API_CONFIGURED && <button className="button button-primary" onClick={openCreateModal}><Icon name="plus"/> Add monitor</button>}</div></td></tr>}
           </tbody></table></div>
           <div className="table-footer"><span>Showing <b>{visible.length}</b> of <b>{monitors.length}</b> monitors</span><span>{lastSyncedAt ? 'Last synced ' + formatDate(lastSyncedAt.toISOString()) : 'Waiting for API data'} · auto-refresh every 60 seconds</span></div>
         </section>
@@ -374,7 +461,8 @@ export default function App() {
       </div>
     </main>
     {modalOpen && <MonitorModal monitor={modalMonitor} onClose={() => { setModalOpen(false); setModalMonitor(null); }} onSave={saveMonitor}/>}
-    {historyMonitor && <HistoryModal monitor={historyMonitor} results={checkData[historyMonitor.id] ?? []} loading={historyLoading} error={historyError} onRetry={() => loadHistory(historyMonitor)} onClose={() => setHistoryMonitor(null)}/>}
-    {toast && <div className="toast"><Icon name="check"/>{toast}</div>}
+    {historyMonitor && <HistoryModal monitor={historyMonitor} results={checkData[historyMonitor.id] ?? []} loading={historyLoading} error={historyError} onRetry={() => loadHistory(historyMonitor)} onClose={() => setHistoryMonitor(null)} onEdit={() => { const selected = historyMonitor; setHistoryMonitor(null); setModalMonitor(selected); setModalOpen(true); }} onToggle={() => runAction(historyMonitor, historyMonitor.enabled ? api.pauseMonitor : api.resumeMonitor, historyMonitor.enabled ? 'Monitor paused.' : 'Monitor resumed.')} onDelete={() => { setHistoryMonitor(null); deleteMonitor(historyMonitor); }} busyId={busyId}/>}
+    <DeleteDialog monitor={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} busy={Boolean(deleteTarget && busyId === deleteTarget.id)}/>
+    {toast && <div className="toast" role="status" aria-live="polite"><Icon name="check"/>{toast}</div>}
   </div>;
 }
