@@ -108,3 +108,6 @@ tbody tr:hover { background:#f1f4f7; }
 @media(prefers-reduced-motion:reduce) {
   .auth-screen *, .auth-screen *::before, .auth-screen *::after { transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; }
 }
+
+.app-shell .worker-status-pill { border-color:#e4e7eb; background:#f4f5f7; color:#727984; }
+.app-shell .worker-status-pill i { background:#a0a5ad; }
