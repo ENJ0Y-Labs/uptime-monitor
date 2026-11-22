@@ -293,7 +293,7 @@ export default function App() {
       <header className="auth-header">
         <a className="auth-brand" href="#" aria-label="APIMON home"><span className="brand-mark">A</span><span>APIMON</span></a>
         <div className="auth-header-actions">
-          <span className="worker-status-pill" title="Worker API status: Unknown"><i/> Worker API · Unknown</span>
+          <span className="worker-status-pill" title="Worker API status: Unknown"><i aria-hidden="true"/> Worker API · Unknown</span>
           <button className="theme-toggle-btn" type="button" onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={theme === 'dark'} title="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'}/></button>
         </div>
       </header>
@@ -336,7 +336,7 @@ export default function App() {
       <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">i</span><b>Live monitoring data</b><p>Monitor settings and check history are loaded from the Worker API.</p><a href="https://github.com/ENJ0Y-Labs/uptime-monitor" target="_blank" rel="noreferrer">Project repository ↗</a></div><div className="profile-row"><div className="profile-avatar">A</div><span><b>APIMON</b><small>Token-authenticated workspace</small></span></div></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div><div className="top-actions"><span className="worker-status-pill" title="Worker API status: Unknown"><i/> Worker API · Unknown</span><button className="button button-quiet" onClick={logout}>Sign out</button><div className="profile-avatar small-avatar">A</div></div></header>
+      <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <b>Monitors</b></div><div className="top-actions"><span className="worker-status-pill" title="Worker API status: Unknown"><i aria-hidden="true"/> Worker API · Unknown</span><button className="button button-quiet" onClick={logout}>Sign out</button><div className="profile-avatar small-avatar">A</div></div></header>
       <div className="page-content">
         <div className="page-heading"><div><span className="eyebrow">APIMON WORKSPACE</span><h1>Monitors</h1><p>Manage endpoints and review their real monitoring results.</p></div><div className="heading-actions"><button className="button button-outline" onClick={() => refresh()} disabled={refreshing}><Icon name="refresh"/>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="button button-primary" onClick={openCreateModal} disabled={!API_CONFIGURED}><Icon name="plus"/> Add monitor</button></div></div>
         {error && <div className="api-banner error-banner" role="alert"><span className="demo-banner-icon">!</span><span><b>API request failed.</b> {error}</span><button onClick={() => refresh()}>Retry</button></div>}
