@@ -158,3 +158,11 @@ tbody tr:hover { background:#f1f4f7; }
 .monitor-stand:before{content:'';position:absolute;top:0;width:62px;height:30px;background:linear-gradient(90deg,#202632,#303846,#202632);clip-path:polygon(20% 0,80% 0,100% 100%,0 100%)}
 .monitor-stand span{position:absolute;bottom:0;width:170px;height:13px;border-radius:50% 50% 5px 5px;background:linear-gradient(180deg,#343c49,#171d28);box-shadow:0 7px 12px rgba(0,0,0,.35)}
 @media(max-width:767px){.monitor-frame{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}.monitor-chin,.monitor-stand{display:none}}
+
+@media(max-width:760px){
+  .app-shell .sidebar{display:flex;flex-direction:column;visibility:hidden}
+  .app-shell .sidebar.sidebar-open{visibility:visible}
+  .app-shell .workspace-label,.app-shell .workspace-switch,.app-shell .nav-label,.app-shell .sidebar-bottom{display:block}
+  .app-shell .workspace-switch{display:flex}
+  .app-shell .brand small{display:block}
+}

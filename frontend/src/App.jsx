@@ -471,7 +471,7 @@ export default function App() {
     </main>
     {modalOpen && <MonitorModal monitor={modalMonitor} onClose={() => { setModalOpen(false); setModalMonitor(null); }} onSave={saveMonitor}/>}
     {historyMonitor && <HistoryModal monitor={historyMonitor} results={checkData[historyMonitor.id] ?? []} loading={historyLoading} error={historyError} onRetry={() => loadHistory(historyMonitor)} onClose={() => setHistoryMonitor(null)} onEdit={() => { const selected = historyMonitor; setHistoryMonitor(null); setModalMonitor(selected); setModalOpen(true); }} onToggle={() => runAction(historyMonitor, historyMonitor.enabled ? api.pauseMonitor : api.resumeMonitor, historyMonitor.enabled ? 'Monitor paused.' : 'Monitor resumed.')} onDelete={() => { setHistoryMonitor(null); deleteMonitor(historyMonitor); }} busyId={busyId}/>}
-    <DeleteDialog monitor={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} busy={Boolean(deleteTarget && busyId === deleteTarget.id)}/>
+    {deleteTarget && <DeleteDialog monitor={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} busy={busyId === deleteTarget.id}/>}
     {toast && <div className="toast" role="status" aria-live="polite"><Icon name="check"/>{toast}</div>}
   </div>;
 }
