@@ -166,3 +166,5 @@ tbody tr:hover { background:#f1f4f7; }
   .app-shell .workspace-switch{display:flex}
   .app-shell .brand small{display:block}
 }
+
+.app-shell .monitor-details-backdrop{z-index:65}.app-shell .delete-backdrop{z-index:70}
